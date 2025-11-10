@@ -12,7 +12,7 @@ const DEFAULT_DURATION: Duration = {
 };
 
 const DEFAULT_THEME = 'dark';
-const MIN_PROFILE_NAME_LENGTH = 4;
+const MIN_PROFILE_NAME_LENGTH = 2;
 
 // Helper functions
 const handleError = (operation: string, error: unknown): never => {
