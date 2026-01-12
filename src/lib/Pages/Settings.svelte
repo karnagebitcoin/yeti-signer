@@ -99,13 +99,16 @@
 		{/each}
 		<div class="justify-between items-stretch flex gap-5 mt-6">
 			<div class="flex flex-grow">
-				<input
-					type="text"
-					class="w-full h-12 px-4 py-3 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl text-black dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-pink-400 dark:focus:ring-teal-400 focus:border-transparent transition-all"
-					id="value"
-					bind:value={relayInput}
-					placeholder="Enter relay URL"
-				/>
+				<div class="relative w-full">
+					<span class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 font-mono text-sm pointer-events-none">wss://</span>
+					<input
+						type="text"
+						class="w-full h-12 pl-16 pr-4 py-3 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl text-black dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-pink-400 dark:focus:ring-teal-400 focus:border-transparent transition-all"
+						id="value"
+						bind:value={relayInput}
+						placeholder="relay.example.com"
+					/>
+				</div>
 			</div>
 			<div class="justify-center items-stretch">
 				<button
