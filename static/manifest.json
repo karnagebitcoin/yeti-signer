@@ -1,10 +1,13 @@
 {
 	"manifest_version": 3,
 	"name": "Keys.Band",
-	"version": "1.5.0",
+	"version": "1.6.0",
 	"description": "Nostr Nip07 implementation",
 	"action": {
 		"default_popup": "popup.html"
+	},
+	"side_panel": {
+		"default_path": "sidepanel.html"
 	},
 	"icons": {
 		"16": "assets/logo-on.png",
@@ -16,7 +19,7 @@
 		"service_worker": "background.js",
 		"type": "module"
 	},
-	"permissions": ["storage", "scripting", "tabs"],
+	"permissions": ["storage", "scripting", "tabs", "sidePanel"],
 	"host_permissions": ["https://*/*", "http://*/*", "<all_urls>"],
 	"content_scripts": [
 		{

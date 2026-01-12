@@ -87,8 +87,11 @@
 	const promise = handleData();
 
 	onMount(() => {
-		// Set default popup dimensions if not authorization request
-		if (!isAuthorizationRequest) {
+		// Check if we're in a side panel (not a popup)
+		const isSidePanel = document.getElementById('sidepanel') !== null;
+
+		// Set default popup dimensions only if not authorization request and not side panel
+		if (!isAuthorizationRequest && !isSidePanel) {
 			document.body.style.width = '400px';
 			document.body.style.height = '500px';
 		}

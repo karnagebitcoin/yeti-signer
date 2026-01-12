@@ -16,7 +16,13 @@ const session = sessionController();
 
 
 
-web.runtime.onInstalled.addListener(() => BrowserUtil.injectJsinAllTabs('content.js'));
+web.runtime.onInstalled.addListener(() => {
+	BrowserUtil.injectJsinAllTabs('content.js');
+	// Configure side panel behavior - allow opening via action click when popup is not shown
+	if (chrome.sidePanel) {
+		chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
+	}
+});
 web.runtime.onStartup.addListener(() => BrowserUtil.injectJsinAllTabs('content.js'));
 web.tabs.onActivated.addListener(async (activeInfo) => browserController.switchIcon(activeInfo));
 BrowserUtil.getCurrentTab().then((tab) => browserController.switchIcon({ tabId: tab.id as number }));
