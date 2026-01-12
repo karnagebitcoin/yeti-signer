@@ -1,5 +1,5 @@
 // Inline browser API getter to avoid imports
-function getBrowser() {
+function getBrowser(): typeof chrome | null {
   // @ts-ignore
   if (typeof browser !== "undefined") {
     // @ts-ignore
@@ -12,7 +12,7 @@ function getBrowser() {
   return null;
 }
 
-const web: typeof chrome = getBrowser();
+const web = getBrowser()!;
 
 if (window.nostr === undefined) {
   const script = document.createElement("script");
@@ -29,19 +29,19 @@ window.addEventListener("message", (event) => {
   if (event.data.response === undefined || event.data.response === null) {
     const data = event.data || {};
     data["url"] = event.origin;
-    
 
-    
-    web.runtime.sendMessage({ ...data }, (response) => {
 
-      
+
+    web.runtime.sendMessage({ ...data }, (response: unknown) => {
+
+
       // Check for runtime errors
       if (web.runtime.lastError) {
         console.error('[Content] Runtime error:', web.runtime.lastError);
         return;
       }
-      
-      if (response && response.response !== undefined && response.response !== null) {
+
+      if (response && typeof response === 'object' && 'response' in response && (response as Record<string, unknown>).response !== undefined && (response as Record<string, unknown>).response !== null) {
 
         try {
           window.postMessage(response, "*");

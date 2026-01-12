@@ -19,7 +19,7 @@ const session = sessionController();
 web.runtime.onInstalled.addListener(() => {
 	BrowserUtil.injectJsinAllTabs('content.js');
 	// Configure side panel behavior - allow opening via action click when popup is not shown
-	if (chrome.sidePanel) {
+	if (typeof chrome !== 'undefined' && chrome.sidePanel) {
 		chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
 	}
 });
@@ -364,16 +364,16 @@ const proceedNextRequest = async () => {
 
 setInterval(async () => proceedNextRequest(), 100);
 
-web.runtime.onMessage.addListener((message: Message, sender: MessageSender, sendResponse) => {
+web.runtime.onMessage.addListener((message: Message, sender: MessageSender, sendResponse: (response?: unknown) => void) => {
 
-	
+
 	if (message.prompt) {
 
 		manageResult(message, sender);
 		sendResponse({ message: true });
 	} else {
 
-		
+
 		// Call manageRequest immediately instead of using setInterval
 		manageRequest(message)
 			.then(async (data) => {

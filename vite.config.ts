@@ -1,11 +1,14 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type ConfigEnv } from 'vite';
+import type { PreRenderedChunk } from 'rollup';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { resolve } from 'path';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
-export default defineConfig(({ command }) => {
+const __dirname = new URL('.', import.meta.url).pathname;
+
+export default defineConfig(({ command }: ConfigEnv) => {
   const isDev = command === 'serve';
-  
+
   return {
     base: './',
     plugins: [
@@ -27,18 +30,9 @@ export default defineConfig(({ command }) => {
         ]
       })
     ],
-    // Add server configuration for development
-    server: {
-      watch: {
-        // Watch all files in src directory
-        include: ['src/**/*']
-      }
-    },
     build: {
       // Enable watch mode for development
-      watch: isDev ? {
-        include: ['src/**/*', 'static/**/*']
-      } : null,
+      watch: isDev ? {} : null,
       rollupOptions: {
         input: {
           popup: resolve(__dirname, 'popup.html'),
@@ -47,7 +41,7 @@ export default defineConfig(({ command }) => {
           content: resolve(__dirname, 'src/content.ts')
         },
         output: {
-          entryFileNames: (chunkInfo) => {
+          entryFileNames: (chunkInfo: PreRenderedChunk) => {
             if (chunkInfo.name === 'background') return 'background.js';
             if (chunkInfo.name === 'content') return 'content.js';
             return 'assets/[name]-[hash].js';
