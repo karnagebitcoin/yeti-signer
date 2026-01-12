@@ -57,15 +57,23 @@ const makeResponse = async (type: string, data: any) => {
 	await profileController.loadProfiles();
 	const user = get(userProfile);
 	const privateKey: string = user.data?.privateKey || '';
-	let res;
+	let res: any;
 
 	switch (type) {
 		case 'getPublicKey':
 			res = getPublicKey(privateKey);
 			break;
 		case 'getRelays':
-			res = user.data?.relays?.map((relay) => {
-				return { url: relay?.url };
+			// NIP-07 format: { "wss://relay.url": { read: true, write: true } }
+			res = {};
+			user.data?.relays?.forEach((relay) => {
+				if (relay?.url) {
+					const access = relay.access ?? 2; // Default to READ_WRITE (2)
+					res[relay.url] = {
+						read: access === 0 || access === 2,  // READ (0) or READ_WRITE (2)
+						write: access === 1 || access === 2  // WRITE (1) or READ_WRITE (2)
+					};
+				}
 			});
 			break;
 		case 'signEvent':
