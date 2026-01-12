@@ -6,16 +6,19 @@
 	import Icon from '@iconify/svelte';
 
 	let durationChoice = $state(0);
+	let showRawEvent = $state(false);
 
 	let {
 		domain,
 		popupType,
+		eventData,
 		isPopup = false,
 		onaccepted,
 		oncancel
 	}: {
 		domain: string;
 		popupType: string;
+		eventData?: any;
 		isPopup?: boolean;
 		onaccepted?: (event: { detail: { duration: number } }) => void;
 		oncancel?: (event: { detail: { duration: number } }) => void;
@@ -24,70 +27,175 @@
 	function handleDurationChange(event: { detail: { value: number } }) {
 		durationChoice = event.detail.value;
 	}
+
+	// Format JSON with syntax highlighting
+	function formatJsonWithHighlight(data: any): string {
+		const json = JSON.stringify(data, null, 2);
+
+		// We'll build the highlighted HTML by processing character by character
+		let result = '';
+		let i = 0;
+
+		while (i < json.length) {
+			const char = json[i];
+
+			// Handle strings
+			if (char === '"') {
+				let str = '"';
+				i++;
+				while (i < json.length && json[i] !== '"') {
+					if (json[i] === '\\' && i + 1 < json.length) {
+						str += json[i] + json[i + 1];
+						i += 2;
+					} else {
+						str += json[i];
+						i++;
+					}
+				}
+				str += '"';
+				i++;
+
+				// Escape HTML entities in the string content
+				const escaped = str
+					.replace(/&/g, '&amp;')
+					.replace(/</g, '&lt;')
+					.replace(/>/g, '&gt;');
+
+				// Check if this is a key (followed by colon)
+				let j = i;
+				while (j < json.length && (json[j] === ' ' || json[j] === '\t')) j++;
+
+				if (json[j] === ':') {
+					result += '<span style="color: #c084fc;">' + escaped + '</span>';
+				} else {
+					result += '<span style="color: #4ade80;">' + escaped + '</span>';
+				}
+			}
+			// Handle numbers
+			else if (char === '-' || (char >= '0' && char <= '9')) {
+				let num = '';
+				while (i < json.length && (json[i] === '-' || json[i] === '.' || (json[i] >= '0' && json[i] <= '9'))) {
+					num += json[i];
+					i++;
+				}
+				result += '<span style="color: #22d3ee;">' + num + '</span>';
+			}
+			// Handle booleans and null
+			else if (json.substring(i, i + 4) === 'true') {
+				result += '<span style="color: #facc15;">true</span>';
+				i += 4;
+			}
+			else if (json.substring(i, i + 5) === 'false') {
+				result += '<span style="color: #facc15;">false</span>';
+				i += 5;
+			}
+			else if (json.substring(i, i + 4) === 'null') {
+				result += '<span style="color: #9ca3af;">null</span>';
+				i += 4;
+			}
+			// Handle other characters (brackets, colons, etc.)
+			else {
+				if (char === '<') result += '&lt;';
+				else if (char === '>') result += '&gt;';
+				else if (char === '&') result += '&amp;';
+				else result += char;
+				i++;
+			}
+		}
+
+		return result;
+	}
 </script>
 
-<div class="w-full h-full mx-auto flex flex-col flex-grow justify-between mt-3">
-    <div
-		class="justify-center kb-surface flex w-full flex-col p-4 rounded-2xl mx-auto flex-grow"
-	>
+<div class="w-full h-full mx-auto flex flex-col mt-3">
+	<!-- Scrollable content area -->
+	<div class="flex-grow min-h-0 overflow-auto">
 		<div
-			class="text-gray-800 dark:text-gray-400 text-opacity-70 text-xs font-semibold leading-4 tracking-[3px]"
+			class="justify-center kb-surface flex w-full flex-col p-4 rounded-2xl mx-auto"
 		>
-			AUTHORIZATION
-		</div>
-		<div class="text-black dark:text-white text-2xl font-semibold leading-7 whitespace-nowrap mt-2">
-			{domain}
-		</div>
-		<div class="text-black dark:text-white text-base leading-5 whitespace-nowrap mt-2">
-			would like to:
-		</div>
-		<div class="items-center flex justify-between gap-3 mt-2">
-			<Icon icon="mdi:check" width={16} class="text-pink-600 dark:text-teal-400" />
 			<div
-				class="text-black dark:text-white text-base leading-5 self-stretch grow whitespace-nowrap"
+				class="text-gray-800 dark:text-gray-400 text-opacity-70 text-xs font-semibold leading-4 tracking-[3px]"
 			>
-				{#if isPopup}
-					{tr(popupType)}
-				{:else}
-					{tr('permission')}
-				{/if}
+				AUTHORIZATION
 			</div>
+			<div class="text-black dark:text-white text-2xl font-semibold leading-7 whitespace-nowrap mt-2">
+				{domain}
+			</div>
+			<div class="text-black dark:text-white text-base leading-5 whitespace-nowrap mt-2">
+				would like to:
+			</div>
+			<div class="items-center flex justify-between gap-3 mt-2">
+				<Icon icon="mdi:check" width={16} class="text-pink-600 dark:text-teal-400" />
+				<div
+					class="text-black dark:text-white text-base leading-5 self-stretch grow whitespace-nowrap"
+				>
+					{#if isPopup}
+						{tr(popupType)}
+					{:else}
+						{tr('permission')}
+					{/if}
+				</div>
+			</div>
+
+			<!-- Raw Event Dropdown -->
+			{#if eventData && (popupType === 'signEvent' || popupType === 'nip04.encrypt' || popupType === 'nip04.decrypt')}
+				<div class="mt-3">
+					<button
+						class="w-full flex items-center justify-between text-left text-sm text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-white transition-colors py-2"
+						onclick={() => showRawEvent = !showRawEvent}
+					>
+						<span class="flex items-center gap-2">
+							<Icon icon="mdi:code-json" width={16} />
+							<span>View raw event</span>
+						</span>
+						<Icon icon={showRawEvent ? "mdi:chevron-up" : "mdi:chevron-down"} width={20} />
+					</button>
+
+					{#if showRawEvent}
+						<div class="mt-2 p-3 bg-zinc-800 rounded-lg overflow-auto max-h-[300px] border border-zinc-600">
+							<pre class="text-xs font-mono leading-relaxed whitespace-pre-wrap break-all text-gray-100">{@html formatJsonWithHighlight(eventData)}</pre>
+						</div>
+					{/if}
+				</div>
+			{/if}
 		</div>
-		<div class="flex-grow"></div>
 	</div>
 
-	<Duration on:durationChange={handleDurationChange} />
+	<!-- Fixed footer with Duration and buttons -->
+	<div class="flex-shrink-0 pt-3">
+		<Duration on:durationChange={handleDurationChange} />
 
-	<div class="items-stretch flex w-full gap-3 mt-3">
-		<button
-			class="btn text-black dark:text-white bg-surface-400 font-medium leading-5 whitespace-nowrap justify-center bg-opacity-20 px-8 py-3 rounded-full"
-			onclick={async () => {
-				try {
-					await accept(false, domain, durationChoice);
-					oncancel?.({ detail: { duration: durationChoice } });
-				} catch (error) {
-					console.error('Error in reject:', error);
-				}
-			}}
-		>
-			Reject
-		</button>
-		<button
-			class="btn bg-pink-400 dark:bg-teal-400 flex gap-2 px-20 py-3 rounded-full w-full place-content-center max-md:px-5"
-			onclick={async () => {
-				console.log('Confirm button clicked!', { domain, durationChoice });
-				try {
-					const ok = await accept(true, domain, durationChoice);
-					console.log('Accept result:', ok);
-					onaccepted?.({ detail: { duration: durationChoice } });
-					console.log('Callback onaccepted called');
-				} catch (error) {
-					console.error('Error in confirm:', error);
-				}
-			}}
-		>
-			<div class="text-black text-base font-medium leading-5">Confirm</div>
-			<Icon icon="mdi:check" width={20} class="text-black" />
-		</button>
+		<div class="items-stretch flex w-full gap-3 mt-3">
+			<button
+				class="btn text-black dark:text-white bg-surface-400 font-medium leading-5 whitespace-nowrap justify-center bg-opacity-20 px-8 py-3 rounded-full"
+				onclick={async () => {
+					try {
+						await accept(false, domain, durationChoice);
+						oncancel?.({ detail: { duration: durationChoice } });
+					} catch (error) {
+						console.error('Error in reject:', error);
+					}
+				}}
+			>
+				Reject
+			</button>
+			<button
+				class="btn bg-pink-400 dark:bg-teal-400 flex gap-2 px-20 py-3 rounded-full w-full place-content-center max-md:px-5"
+				onclick={async () => {
+					console.log('Confirm button clicked!', { domain, durationChoice });
+					try {
+						const ok = await accept(true, domain, durationChoice);
+						console.log('Accept result:', ok);
+						onaccepted?.({ detail: { duration: durationChoice } });
+						console.log('Callback onaccepted called');
+					} catch (error) {
+						console.error('Error in confirm:', error);
+					}
+				}}
+			>
+				<div class="text-black text-base font-medium leading-5">Confirm</div>
+				<Icon icon="mdi:check" width={20} class="text-black" />
+			</button>
+		</div>
 	</div>
 </div>
