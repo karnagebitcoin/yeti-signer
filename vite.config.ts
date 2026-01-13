@@ -6,8 +6,25 @@ import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 const __dirname = new URL('.', import.meta.url).pathname;
 
+// Get target browser from environment variable (default: chrome)
+const targetBrowser = process.env.BROWSER || 'chrome';
+const isFirefox = targetBrowser === 'firefox';
+
 export default defineConfig(({ command }: ConfigEnv) => {
   const isDev = command === 'serve';
+
+  // Build input config - Firefox doesn't support sidepanel
+  const inputConfig: Record<string, string> = {
+    popup: resolve(__dirname, 'popup.html'),
+    background: resolve(__dirname, 'src/background.ts'),
+    content: resolve(__dirname, 'src/content.ts'),
+    restore: resolve(__dirname, 'restore.html')
+  };
+
+  // Only include sidepanel for Chrome
+  if (!isFirefox) {
+    inputConfig.sidepanel = resolve(__dirname, 'sidepanel.html');
+  }
 
   return {
     base: './',
@@ -16,8 +33,9 @@ export default defineConfig(({ command }: ConfigEnv) => {
       viteStaticCopy({
         targets: [
           {
-            src: 'static/manifest.json',
-            dest: '.'
+            src: isFirefox ? 'static/manifest.firefox.json' : 'static/manifest.json',
+            dest: '.',
+            rename: 'manifest.json'
           },
           {
             src: 'static/assets/*',
@@ -34,16 +52,12 @@ export default defineConfig(({ command }: ConfigEnv) => {
       // Enable watch mode for development
       watch: isDev ? {} : null,
       rollupOptions: {
-        input: {
-          popup: resolve(__dirname, 'popup.html'),
-          sidepanel: resolve(__dirname, 'sidepanel.html'),
-          background: resolve(__dirname, 'src/background.ts'),
-          content: resolve(__dirname, 'src/content.ts')
-        },
+        input: inputConfig,
         output: {
           entryFileNames: (chunkInfo: PreRenderedChunk) => {
             if (chunkInfo.name === 'background') return 'background.js';
             if (chunkInfo.name === 'content') return 'content.js';
+            if (chunkInfo.name === 'restore') return 'assets/restore.js';
             return 'assets/[name]-[hash].js';
           },
           chunkFileNames: 'assets/[name]-[hash].js',
@@ -51,7 +65,7 @@ export default defineConfig(({ command }: ConfigEnv) => {
           format: 'es'
         }
       },
-      outDir: 'build',
+      outDir: isFirefox ? 'build-firefox' : 'build',
       emptyOutDir: true,
       target: 'esnext',
       assetsDir: 'assets'
@@ -62,7 +76,8 @@ export default defineConfig(({ command }: ConfigEnv) => {
       }
     },
     define: {
-      global: 'globalThis'
+      global: 'globalThis',
+      __BROWSER__: JSON.stringify(targetBrowser)
     }
   };
 });

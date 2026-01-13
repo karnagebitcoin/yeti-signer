@@ -6,6 +6,7 @@
 	import type { Relay, Profile, Duration } from '$lib/types';
 	import { profileController } from '$lib/controllers/profile.controller';
 	import { nip19 } from 'nostr-tools';
+	import { web } from '$lib/utility';
 
 	let relays = $state<Relay[]>([]);
 	let relayInput = $state('');
@@ -20,6 +21,8 @@
 	let restoreStatus = $state<'idle' | 'success' | 'error'>('idle');
 	let restoreMessage = $state('');
 	let fileInput: HTMLInputElement;
+	let showRestoreTextarea = $state(false);
+	let restoreJsonText = $state('');
 
 	// Watch for changes in userProfile and update relays
 	$effect(() => {
@@ -114,19 +117,30 @@
 
 	// Restore settings from backup file
 	const restoreSettings = async (event: Event) => {
+		console.log('[Restore] Event triggered:', event.type);
 		const input = event.target as HTMLInputElement;
 		const file = input.files?.[0];
 
-		if (!file) return;
+		console.log('[Restore] File selected:', file?.name, file?.size);
+
+		if (!file) {
+			console.log('[Restore] No file selected');
+			return;
+		}
 
 		try {
+			console.log('[Restore] Reading file...');
 			const text = await file.text();
+			console.log('[Restore] File content length:', text.length);
 			const backupData = JSON.parse(text);
+			console.log('[Restore] Parsed data:', Object.keys(backupData));
 
 			// Validate backup format
 			if (!backupData.version || !backupData.profiles) {
 				throw new Error('Invalid backup file format');
 			}
+
+			console.log('[Restore] Restoring', backupData.profiles.length, 'profiles...');
 
 			// Restore profiles
 			if (Array.isArray(backupData.profiles)) {
@@ -162,6 +176,7 @@
 				duration.set(backupData.duration as Duration);
 			}
 
+			console.log('[Restore] Success!');
 			restoreStatus = 'success';
 			restoreMessage = `Restored ${backupData.profiles.length} profile(s) successfully!`;
 
@@ -175,7 +190,7 @@
 			}, 3000);
 
 		} catch (error) {
-			console.error('Restore failed:', error);
+			console.error('[Restore] Failed:', error);
 			restoreStatus = 'error';
 			restoreMessage = error instanceof Error ? error.message : 'Failed to restore backup';
 
@@ -387,7 +402,18 @@
 			<button
 				type="button"
 				class="btn w-full bg-zinc-200 dark:bg-zinc-700 text-black dark:text-white font-medium py-3 px-4 rounded-xl hover:bg-zinc-300 dark:hover:bg-zinc-600 transition-colors"
-				on:click={() => fileInput.click()}
+				on:click={() => {
+					// Firefox: open dedicated restore page (popup closes when file picker opens)
+					// Chrome: use inline file picker
+					// @ts-ignore
+					const isFirefox = typeof __BROWSER__ !== 'undefined' && __BROWSER__ === 'firefox';
+					if (isFirefox) {
+						// Firefox detected - open restore page in new tab
+						web.tabs.create({ url: web.runtime.getURL('restore.html') });
+					} else {
+						fileInput.click();
+					}
+				}}
 			>
 				<Icon icon="mdi:upload" class="mr-2" width={20} />
 				Restore from Backup

@@ -29,10 +29,17 @@ const createBrowserController = (): Browser => {
 	};
 	const injectJsInTab = async (tab: Tabs.Tab, jsFileName: string): Promise<void> => {
 		try {
-			await web.scripting.executeScript({
-				target: { tabId: tab.id as number },
-				files: [jsFileName]
-			});
+			// Use scripting API for Chrome (MV3) or tabs.executeScript for Firefox (MV2)
+			if (web.scripting) {
+				await web.scripting.executeScript({
+					target: { tabId: tab.id as number },
+					files: [jsFileName]
+				});
+			} else if (web.tabs.executeScript) {
+				await web.tabs.executeScript(tab.id as number, {
+					file: jsFileName
+				});
+			}
 			return;
 		} catch (e) {
 			// Check if this is a "No tab with id" error - which can happen if tab was closed
@@ -40,18 +47,20 @@ const createBrowserController = (): Browser => {
 				// Tab was closed, we can safely ignore this error
 				return;
 			}
-			
+
 			// Check if this is an extensions gallery error or other restricted page
-			if (e instanceof Error && e.message && 
-				(e.message.includes('extensions gallery cannot be scripted') || 
+			if (e instanceof Error && e.message &&
+				(e.message.includes('extensions gallery cannot be scripted') ||
 				 e.message.includes('Cannot access') ||
 				 e.message.includes('restricted') ||
 				 e.message.includes('chrome://') ||
-				 e.message.includes('chrome-extension://'))) {
+				 e.message.includes('chrome-extension://') ||
+				 e.message.includes('moz-extension://') ||
+				 e.message.includes('about:'))) {
 				// These are expected errors for restricted pages, ignore silently
 				return;
 			}
-			
+
 			// Log other unexpected errors for debugging
 			console.error(tab.id, tab.url);
 			console.error('Error injecting Nostr Provider', e);
@@ -85,19 +94,28 @@ const createBrowserController = (): Browser => {
 			const user: Profile = await backgroundController().getUserProfile();
 			const domain = urlToDomain(tab.url || '');
 			const webSites = user.data?.webSites as { [key: string]: WebSite };
+
+			// Use browserAction for Firefox (MV2) or action for Chrome (MV3)
+			const actionApi = web.action || web.browserAction;
+			if (!actionApi) return;
+
 			if (webSites !== undefined && domain in webSites) {
-				web.action.setIcon({
+				actionApi.setIcon({
 					tabId: tab.id,
 					path: 'assets/logo-on.png'
 				});
 			} else {
-				web.action.setIcon({
+				actionApi.setIcon({
 					tabId: tab.id,
 					path: 'assets/logo-off.png'
 				});
 			}
 		} catch (error) {
 			if (error instanceof Error && error.message.includes('No tab with id')) {
+				return;
+			}
+			// Silently ignore action API errors on Firefox
+			if (error instanceof Error && error.message.includes('action is undefined')) {
 				return;
 			}
 			throw error;
