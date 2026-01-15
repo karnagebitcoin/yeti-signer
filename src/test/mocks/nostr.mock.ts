@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import type { Event, Relay } from 'nostr-tools';
+import type { Event } from 'nostr-tools';
 
 export const mockSimplePool = {
 	ensureRelay: vi.fn().mockResolvedValue({
@@ -28,10 +28,6 @@ export const mockEvent: Event = {
 	sig: 'test-signature'
 };
 
-export const mockRelay: Relay = {
-	url: 'wss://test-relay.example.com',
-	enabled: true,
-	created_at: new Date()
-};
+export const mockRelay = 'wss://test-relay.example.com';
 
 export const mockRelayList = ['wss://nos.lol', 'wss://relay.damus.io', 'wss://nostr.wine'];
