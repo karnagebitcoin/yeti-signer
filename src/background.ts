@@ -16,7 +16,13 @@ const session = sessionController();
 
 
 
-web.runtime.onInstalled.addListener(() => BrowserUtil.injectJsinAllTabs('content.js'));
+web.runtime.onInstalled.addListener(() => {
+	BrowserUtil.injectJsinAllTabs('content.js');
+	// Configure side panel behavior - allow opening via action click when popup is not shown
+	if (typeof chrome !== 'undefined' && chrome.sidePanel) {
+		chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
+	}
+});
 web.runtime.onStartup.addListener(() => BrowserUtil.injectJsinAllTabs('content.js'));
 web.tabs.onActivated.addListener(async (activeInfo) => browserController.switchIcon(activeInfo));
 BrowserUtil.getCurrentTab().then((tab) => browserController.switchIcon({ tabId: tab.id as number }));
@@ -51,15 +57,23 @@ const makeResponse = async (type: string, data: any) => {
 	await profileController.loadProfiles();
 	const user = get(userProfile);
 	const privateKey: string = user.data?.privateKey || '';
-	let res;
+	let res: any;
 
 	switch (type) {
 		case 'getPublicKey':
 			res = getPublicKey(privateKey);
 			break;
 		case 'getRelays':
-			res = user.data?.relays?.map((relay) => {
-				return { url: relay?.url };
+			// NIP-07 format: { "wss://relay.url": { read: true, write: true } }
+			res = {};
+			user.data?.relays?.forEach((relay) => {
+				if (relay?.url) {
+					const access = relay.access ?? 2; // Default to READ_WRITE (2)
+					res[relay.url] = {
+						read: access === 0 || access === 2,  // READ (0) or READ_WRITE (2)
+						write: access === 1 || access === 2  // WRITE (1) or READ_WRITE (2)
+					};
+				}
 			});
 			break;
 		case 'signEvent':
@@ -358,16 +372,16 @@ const proceedNextRequest = async () => {
 
 setInterval(async () => proceedNextRequest(), 100);
 
-web.runtime.onMessage.addListener((message: Message, sender: MessageSender, sendResponse) => {
+web.runtime.onMessage.addListener((message: Message, sender: MessageSender, sendResponse: (response?: unknown) => void) => {
 
-	
+
 	if (message.prompt) {
 
 		manageResult(message, sender);
 		sendResponse({ message: true });
 	} else {
 
-		
+
 		// Call manageRequest immediately instead of using setInterval
 		manageRequest(message)
 			.then(async (data) => {

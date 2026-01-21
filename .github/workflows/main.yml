@@ -17,4 +17,5 @@ jobs:
       - run: pnpm install
     #   - run: pnpm lint
       - run: pnpm check
+      - run: pnpm test:run
       - run: pnpm run build

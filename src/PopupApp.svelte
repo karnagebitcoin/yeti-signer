@@ -68,8 +68,10 @@
 				console.log('[Popup] Is authorization request:', isAuthorizationRequest);
 				
 				if (isAuthorizationRequest) {
-					document.body.style.width = '383px';
-					document.body.style.height = '460px';
+					document.body.style.minWidth = '383px';
+					document.body.style.minHeight = '460px';
+					document.body.style.width = '100%';
+					document.body.style.height = '100%';
 					document.title = 'Keys.Band - Authorization';
 					console.log('[Popup] Set authorization popup dimensions');
 				}
@@ -87,8 +89,11 @@
 	const promise = handleData();
 
 	onMount(() => {
-		// Set default popup dimensions if not authorization request
-		if (!isAuthorizationRequest) {
+		// Check if we're in a side panel (not a popup)
+		const isSidePanel = document.getElementById('sidepanel') !== null;
+
+		// Set default popup dimensions only if not authorization request and not side panel
+		if (!isAuthorizationRequest && !isSidePanel) {
 			document.body.style.width = '400px';
 			document.body.style.height = '500px';
 		}
@@ -103,10 +108,10 @@
 {:then}
 	{#if isAuthorizationRequest && parameter}
 		<!-- Authorization popup -->
-		<div class="w-full h-full flex flex-col p-4 mx-auto items-center dark:bg-[#222222] bg-white">
+		<div class="w-full h-screen flex flex-col p-4 mx-auto items-center dark:bg-[#222222] bg-white overflow-hidden">
 			{#if 'previousProfile' in parameter && parameter.previousProfile.id !== $userProfile.id}
 				<span
-					class="alert alert-warning bg-yellow-300 text-black mb-2 flex flex-row items-center text-sm p-2 gap-2"
+					class="alert alert-warning bg-yellow-300 text-black mb-2 flex flex-row items-center text-sm p-2 gap-2 flex-shrink-0"
 				>
 					<Icon icon="pixelarticons:alert" width={56} />
 					<span>
@@ -115,7 +120,7 @@
 					</span>
 				</span>
 			{/if}
-			<div class="w-full kb-surface rounded-lg h-[72px]">
+			<div class="w-full kb-surface rounded-lg h-[72px] flex-shrink-0">
 				<div
 					class="text-gray-800 dark:text-gray-400 text-opacity-70 font-semibold leading-4 tracking-[3px] flex flex-row items-center gap-2 p-2"
 				>
@@ -147,27 +152,30 @@
 				</div>
 				<AccountDropdownMenu {accountDropdownMenuOpen} canEdit={false} />
 			</div>
-			<Authorization
-				popupType={parameter.type}
-				isPopup={true}
-				domain={urlToDomain(parameter.url || '')}
-				oncancel={(event) =>
-					browserController.sendAuthorizationResponse(
-						false,
-						event.detail.duration,
-						parameter?.url,
-						parameter?.requestId || ''
-					)}
-				onaccepted={(event) => {
-					console.log('Accepted event received in PopupApp:', event.detail);
-					browserController.sendAuthorizationResponse(
-						true,
-						event.detail.duration,
-						parameter?.url,
-						parameter?.requestId || ''
-					);
-				}}
-			/>
+			<div class="w-full flex-grow min-h-0 flex flex-col">
+				<Authorization
+					popupType={parameter.type}
+					eventData={parameter.data}
+					isPopup={true}
+					domain={urlToDomain(parameter.url || '')}
+					oncancel={(event) =>
+						browserController.sendAuthorizationResponse(
+							false,
+							event.detail.duration,
+							parameter?.url,
+							parameter?.requestId || ''
+						)}
+					onaccepted={(event) => {
+						console.log('Accepted event received in PopupApp:', event.detail);
+						browserController.sendAuthorizationResponse(
+							true,
+							event.detail.duration,
+							parameter?.url,
+							parameter?.requestId || ''
+						);
+					}}
+				/>
+			</div>
 		</div>
 	{:else}
 		<!-- Normal popup -->

@@ -2,10 +2,11 @@
 	import Icon from '@iconify/svelte';
 	import ToggleSwitch from '../components/ToggleSwitch.svelte';
 	import { AppPageItem } from '$lib/components/App';
-	import { userProfile, profiles } from '$lib/stores/data';
-	import type { Relay } from '$lib/types';
+	import { userProfile, profiles, browser, theme, duration } from '$lib/stores/data';
+	import type { Relay, Profile, Duration } from '$lib/types';
 	import { profileController } from '$lib/controllers/profile.controller';
 	import { nip19 } from 'nostr-tools';
+	import { web } from '$lib/utility';
 
 	let relays = $state<Relay[]>([]);
 	let relayInput = $state('');
@@ -17,6 +18,11 @@
 		privateKey: false,
 		nsec: false
 	});
+	let restoreStatus = $state<'idle' | 'success' | 'error'>('idle');
+	let restoreMessage = $state('');
+	let fileInput: HTMLInputElement;
+	let showRestoreTextarea = $state(false);
+	let restoreJsonText = $state('');
 
 	// Watch for changes in userProfile and update relays
 	$effect(() => {
@@ -56,10 +62,10 @@
 			}));
 
 			// Create blob and download
-			const blob = new Blob([JSON.stringify(exportData, null, 2)], { 
-				type: 'application/json' 
+			const blob = new Blob([JSON.stringify(exportData, null, 2)], {
+				type: 'application/json'
 			});
-			
+
 			const url = URL.createObjectURL(blob);
 			const link = document.createElement('a');
 			link.href = url;
@@ -71,6 +77,131 @@
 		} catch (error) {
 			console.error('Export failed:', error);
 			alert('Failed to export keys');
+		}
+	};
+
+	// Backup all settings
+	const backupSettings = async () => {
+		try {
+			const currentProfileId = (await browser.get('currentProfile'))?.currentProfile;
+			const currentTheme = (await browser.get('theme'))?.theme;
+			const currentDuration = (await browser.get('duration'))?.duration;
+
+			const backupData = {
+				version: 1,
+				exportDate: new Date().toISOString(),
+				profiles: $profiles,
+				currentProfile: currentProfileId,
+				theme: currentTheme,
+				duration: currentDuration
+			};
+
+			const blob = new Blob([JSON.stringify(backupData, null, 2)], {
+				type: 'application/json'
+			});
+
+			const url = URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = url;
+			const date = new Date().toISOString().split('T')[0];
+			link.download = `keys-band-backup-${date}.json`;
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+			URL.revokeObjectURL(url);
+		} catch (error) {
+			console.error('Backup failed:', error);
+			alert('Failed to create backup');
+		}
+	};
+
+	// Restore settings from backup file
+	const restoreSettings = async (event: Event) => {
+		console.log('[Restore] Event triggered:', event.type);
+		const input = event.target as HTMLInputElement;
+		const file = input.files?.[0];
+
+		console.log('[Restore] File selected:', file?.name, file?.size);
+
+		if (!file) {
+			console.log('[Restore] No file selected');
+			return;
+		}
+
+		try {
+			console.log('[Restore] Reading file...');
+			const text = await file.text();
+			console.log('[Restore] File content length:', text.length);
+			const backupData = JSON.parse(text);
+			console.log('[Restore] Parsed data:', Object.keys(backupData));
+
+			// Validate backup format
+			if (!backupData.version || !backupData.profiles) {
+				throw new Error('Invalid backup file format');
+			}
+
+			console.log('[Restore] Restoring', backupData.profiles.length, 'profiles...');
+
+			// Restore profiles
+			if (Array.isArray(backupData.profiles)) {
+				await browser.set({ profiles: backupData.profiles });
+				profiles.set(backupData.profiles);
+			}
+
+			// Restore current profile
+			if (backupData.currentProfile) {
+				await browser.set({ currentProfile: backupData.currentProfile });
+				const restoredProfile = backupData.profiles.find(
+					(p: Profile) => p.id === backupData.currentProfile
+				);
+				if (restoredProfile) {
+					userProfile.set(restoredProfile);
+				}
+			}
+
+			// Restore theme
+			if (backupData.theme) {
+				await browser.set({ theme: backupData.theme });
+				theme.set(backupData.theme);
+				if (backupData.theme === 'dark') {
+					document.documentElement.classList.add('dark');
+				} else {
+					document.documentElement.classList.remove('dark');
+				}
+			}
+
+			// Restore duration
+			if (backupData.duration) {
+				await browser.set({ duration: backupData.duration });
+				duration.set(backupData.duration as Duration);
+			}
+
+			console.log('[Restore] Success!');
+			restoreStatus = 'success';
+			restoreMessage = `Restored ${backupData.profiles.length} profile(s) successfully!`;
+
+			// Reset file input
+			input.value = '';
+
+			// Clear status after 3 seconds
+			setTimeout(() => {
+				restoreStatus = 'idle';
+				restoreMessage = '';
+			}, 3000);
+
+		} catch (error) {
+			console.error('[Restore] Failed:', error);
+			restoreStatus = 'error';
+			restoreMessage = error instanceof Error ? error.message : 'Failed to restore backup';
+
+			// Reset file input
+			input.value = '';
+
+			// Clear status after 3 seconds
+			setTimeout(() => {
+				restoreStatus = 'idle';
+				restoreMessage = '';
+			}, 3000);
 		}
 	};
 </script>
@@ -99,13 +230,16 @@
 		{/each}
 		<div class="justify-between items-stretch flex gap-5 mt-6">
 			<div class="flex flex-grow">
-				<input
-					type="text"
-					class="w-full h-12 px-4 py-3 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl text-black dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-pink-400 dark:focus:ring-teal-400 focus:border-transparent transition-all"
-					id="value"
-					bind:value={relayInput}
-					placeholder="Enter relay URL"
-				/>
+				<div class="relative w-full">
+					<span class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 font-mono text-sm pointer-events-none">wss://</span>
+					<input
+						type="text"
+						class="w-full h-12 pl-16 pr-4 py-3 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl text-black dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-pink-400 dark:focus:ring-teal-400 focus:border-transparent transition-all"
+						id="value"
+						bind:value={relayInput}
+						placeholder="relay.example.com"
+					/>
+				</div>
 			</div>
 			<div class="justify-center items-stretch">
 				<button
@@ -229,6 +363,79 @@
 				Export All Keys (keys.json)
 			</button>
 		</div>
+	</div>
+
+	<!-- Backup & Restore Section -->
+	<div
+		class="justify-center items-stretch kb-surface self-stretch flex w-full flex-col mt-3 p-4 rounded-2xl"
+	>
+		<div
+			class="text-gray-800 dark:text-gray-400 text-opacity-70 text-xs font-semibold leading-4 tracking-[2.4000000000000004px]"
+		>
+			BACKUP & RESTORE
+		</div>
+		<p class="text-gray-500 dark:text-gray-400 text-sm mt-2">
+			Create a complete backup of all your profiles, permissions, and settings.
+		</p>
+
+		<!-- Backup Button -->
+		<div class="mt-4">
+			<button
+				type="button"
+				class="btn w-full bg-pink-400 dark:bg-teal-400 text-black font-medium py-3 px-4 rounded-xl hover:bg-pink-500 dark:hover:bg-teal-500 transition-colors"
+				on:click={backupSettings}
+			>
+				<Icon icon="mdi:backup-restore" class="mr-2" width={20} />
+				Create Full Backup
+			</button>
+		</div>
+
+		<!-- Restore Button -->
+		<div class="mt-3">
+			<input
+				type="file"
+				accept=".json"
+				class="hidden"
+				bind:this={fileInput}
+				on:change={restoreSettings}
+			/>
+			<button
+				type="button"
+				class="btn w-full bg-zinc-200 dark:bg-zinc-700 text-black dark:text-white font-medium py-3 px-4 rounded-xl hover:bg-zinc-300 dark:hover:bg-zinc-600 transition-colors"
+				on:click={() => {
+					// Firefox: open dedicated restore page (popup closes when file picker opens)
+					// Chrome: use inline file picker
+					// @ts-ignore
+					const isFirefox = typeof __BROWSER__ !== 'undefined' && __BROWSER__ === 'firefox';
+					if (isFirefox) {
+						// Firefox detected - open restore page in new tab
+						web.tabs.create({ url: web.runtime.getURL('restore.html') });
+					} else {
+						fileInput.click();
+					}
+				}}
+			>
+				<Icon icon="mdi:upload" class="mr-2" width={20} />
+				Restore from Backup
+			</button>
+		</div>
+
+		<!-- Status Message -->
+		{#if restoreStatus !== 'idle'}
+			<div
+				class="mt-3 p-3 rounded-lg text-sm {restoreStatus === 'success'
+					? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'
+					: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300'}"
+			>
+				<div class="flex items-center gap-2">
+					<Icon
+						icon={restoreStatus === 'success' ? 'mdi:check-circle' : 'mdi:alert-circle'}
+						width={20}
+					/>
+					{restoreMessage}
+				</div>
+			</div>
+		{/if}
 	</div>
 
 	<div class="justify-center items-stretch self-stretch flex w-full flex-col mt-2 p-4 rounded-2xl">

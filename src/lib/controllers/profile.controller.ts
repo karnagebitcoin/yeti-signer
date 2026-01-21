@@ -307,14 +307,37 @@ const settingProfile = async (profile: Profile): Promise<void> => {
 };
 
 // RELAY MANAGEMENT
+
+/**
+ * Sanitizes a relay URL:
+ * - Adds wss:// prefix if missing
+ * - Removes trailing slash
+ * - Trims whitespace
+ */
+const sanitizeRelayUrl = (url: string): string => {
+	let sanitized = url.trim();
+
+	// Remove trailing slash(es)
+	sanitized = sanitized.replace(/\/+$/, '');
+
+	// Add wss:// prefix if no protocol specified
+	if (!sanitized.startsWith('wss://') && !sanitized.startsWith('ws://')) {
+		sanitized = 'wss://' + sanitized;
+	}
+
+	return sanitized;
+};
+
 const addRelayToProfile = async (relayUrl: string): Promise<void> => {
 	try {
 		if (!relayUrl || typeof relayUrl !== 'string') {
 			throw new Error('Invalid relay URL');
 		}
 
+		const sanitizedUrl = sanitizeRelayUrl(relayUrl);
+
 		const relay: Relay = {
-			url: relayUrl.trim(),
+			url: sanitizedUrl,
 			enabled: true,
 			created_at: new Date()
 		};
