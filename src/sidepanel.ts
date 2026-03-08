@@ -1,6 +1,8 @@
+import '@fontsource-variable/inter';
 import './styles.css';
 import { mount } from 'svelte';
 import PopupApp from './PopupApp.svelte';
+import { debugLog } from '$lib/utility/logger';
 
 // Wait for DOM to be ready
 function initSidePanel() {
@@ -15,7 +17,7 @@ function initSidePanel() {
 		const app = mount(PopupApp, {
 			target
 		});
-		console.log('SidePanel initialized successfully');
+		debugLog('Side panel initialized');
 		return app;
 	} catch (error) {
 		console.error('Error initializing SidePanel:', error);

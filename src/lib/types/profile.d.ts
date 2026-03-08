@@ -37,6 +37,7 @@ interface WebSiteHistory {
 interface WebSite {
 	auth: boolean;
 	permission?: Authorization;
+	permissions?: { [action: string]: Authorization };
 	history?: WebSiteHistory[];
 }
 
@@ -81,6 +82,8 @@ interface Browser {
 	getCurrentTab: () => Promise<Tabs.Tab>;
 	injectJsInTab: (tab: Tabs.Tab, jsFileName: string) => Promise<void>;
 	injectJsinAllTabs: (jsFileName: string) => Promise<void>;
+	hasSiteAccess: (url: string) => Promise<boolean>;
+	requestSiteAccess: (url: string) => Promise<boolean>;
 	createWindow: (url: string) => Promise<Windows.Window>;
 	switchIcon: (activeInfo: { tabId: number }) => Promise<void>;
 	sendAuthorizationResponse: (

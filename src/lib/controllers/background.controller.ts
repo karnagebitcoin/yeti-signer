@@ -44,7 +44,7 @@ export const backgroundController = (): BackgroundController => {
 		const user = await getUserProfile();
 		const webSites: { [url: string]: WebSite } = user.data?.webSites || {};
 
-		const site = ProfileUtil.getNewWebSitePermission(duration, webSite);
+			const site = ProfileUtil.getNewWebSitePermission(duration, webSite, type);
 		if (user.data) user.data.webSites = { ...webSites, [domain]: site };
 		else user.data = { webSites: { [domain]: site } };
 

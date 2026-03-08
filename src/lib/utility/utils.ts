@@ -59,6 +59,20 @@ export function urlToDomain(url: string): string {
 }
 
 /**
+ * Extracts full origin (scheme + host + port) from URL for permission scope.
+ * @param url - Full URL string
+ * @returns Origin string or empty string if invalid
+ */
+export function urlToScope(url: string): string {
+	if (!url || typeof url !== 'string') return '';
+	try {
+		return new URL(url).origin;
+	} catch {
+		return '';
+	}
+}
+
+/**
  * Gets expiration date based on duration choice
  * @param choice - Duration choice number (0-5)
  * @returns Date object representing expiration time

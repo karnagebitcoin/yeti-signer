@@ -1,116 +1,112 @@
 <script lang="ts">
-	import type { Profile } from '$lib/types/profile';
 	import Icon from '@iconify/svelte';
-	import { Avatar } from '@skeletonlabs/skeleton';
 	import { tick } from 'svelte';
 
-	import { userProfile, profiles, currentPage } from '../stores/data';
 	import { Page } from '$lib/types';
+	import { currentPage, profiles, userProfile } from '$lib/stores/data';
 	import { profileController } from '$lib/controllers/profile.controller';
+	import Avatar from '$lib/components/ui/Avatar.svelte';
 
-	let { 
-		accountDropdownMenuOpen,
-		canEdit = true
-	}: {
-		accountDropdownMenuOpen: boolean;
-		canEdit?: boolean;
-	} = $props();
+	import type { Profile } from '$lib/types/profile';
 
-	const load = (profile: Profile) => profileController.loadProfile(profile);
+	export let accountDropdownMenuOpen = false;
+	export let canEdit = true;
+	export let onclose: () => void = () => {};
+
+	const load = async (profile: Profile) => {
+		await profileController.loadProfile(profile);
+		onclose();
+	};
+
+	const deleteProfile = async (profile: Profile) => {
+		const profileName = profile.name || 'this account';
+		const confirmed = window.confirm(
+			`Delete ${profileName}?\n\nThis will remove it from Yeti and cannot be undone.`
+		);
+		if (!confirmed) return;
+
+		await profileController.deleteProfile(profile);
+		await tick();
+		onclose();
+	};
 </script>
 
-<div data-popup="accountDropdownMenu">
-	<div
-		class="menu-modal card w-72 shadow-xl backdrop-blur-xl kb-surface-strong pt-3 rounded-2xl border-[0.33px] border-solid border-black/10 dark:border-white/10 pl-1"
-	>
-		<nav class="list-nav w-full" class:pb-3={canEdit}>
-			<ul class="w-full pr-1 gap-1">
+{#if accountDropdownMenuOpen}
+	<div class="absolute inset-x-0 top-[calc(100%+0.75rem)] z-50">
+		<div class="kb-menu">
+			<div class="flex items-center justify-between px-3 pb-2 pt-1">
+				<div class="kb-label">Accounts</div>
+				<span class="text-xs text-[var(--kb-muted)]">{$profiles.length} saved</span>
+			</div>
+
+			<div class="flex max-h-72 flex-col gap-1 overflow-y-auto pr-1">
 				{#each $profiles as profile}
-					<li
-						class="flex w-full gap-0 px-1 py-1 hover:bg-white/80 dark:hover:bg-white/10 transition-colors rounded-lg"
-					>
-						<div class="flex-grow min-w-0">
-							<button
-								class="w-full flex items-center gap-0 pl-0 mx-0 py-2 text-left bg-transparent hover:bg-white/60 dark:hover:bg-white/5 text-black dark:text-white transition-colors rounded-md cursor-pointer"
-								on:click={() => load(profile)}
-							>
-								<span class="rounded-full bg-zinc-700 ring-1 ring-zinc-600">
-									<Avatar
-										src={profile?.metadata?.picture || 'https://toastr.space/images/toastr.png'}
-										width="w-8"
-										rounded="rounded-full"
-									/>
-								</span>
-
-								<div
-									class="text-black dark:text-white text-base text-left flex-grow min-w-0 truncate"
-								>
-									{#if profile.name}
-										{profile.name.length > 10 ? profile.name.slice(0, 10) + '...' : profile.name}
-									{/if}
-								</div>
-								{#if $userProfile?.name === profile?.name}
-									<Icon icon="mdi:check" width={22} class="text-pink-600 dark:text-teal-400" />
-								{/if}
-							</button>
-						</div>
-
-						{#if canEdit}
-							<div class="flex items-center pr-2 max-w-12">
-								<button
-									class="bg-transparent btn-xs hover:bg-white/60 dark:hover:bg-white/10 rounded-lg flex items-center justify-center transition-all delete-btn-visible"
-									on:click={async () => {
-										await profileController.deleteProfile(profile);
-										await tick();
-										accountDropdownMenuOpen = true;
-									}}
-									title="Delete profile"
-								>
-									<Icon
-										icon="mdi:trash-can-outline"
-										width={16}
-										class="text-gray-600 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400"
-									/>
-								</button>
-							</div>
-						{/if}
-					</li>
-				{/each}
-				{#if canEdit}
-					<li
-						class="justify-center items-stretch self-stretch border-t-[1px] flex w-full mb-2 flex-col py-1 mt-1 px-3   dark:border-t-white/10 border-solid hover:bg-white/80 dark:hover:bg-white/10 transition-colors rounded-lg"
-					> 
+					<div class="kb-menu-item">
 						<button
-							on:click={() => {
-								currentPage.set(Page.AddProfile);
-							}}
-							class="w-full flex items-center gap-3 px-3 py-2 text-left bg-transparent hover:bg-white/60 dark:hover:bg-white/5 text-black dark:text-white transition-colors rounded-md cursor-pointer"
+							type="button"
+							class="flex min-w-0 flex-1 items-center gap-3 text-left"
+							onclick={() => load(profile)}
 						>
-							<span class="text-gray-600 dark:text-gray-400 mr-2"
-								><Icon icon="mdi:plus" width={20} /></span
-							>
-							<span class="text-black dark:text-white text-left">Add Account</span>
+								<Avatar
+									alt={profile.name || 'Yeti'}
+									sizeClass="size-10"
+									src={profile?.metadata?.picture || 'https://toastr.space/images/toastr.png'}
+								/>
+							<div class="min-w-0 flex-1">
+								<div class="truncate text-sm font-semibold text-[var(--kb-text)]">
+									{profile.name || 'Unnamed account'}
+								</div>
+								<div class="truncate text-xs text-[var(--kb-muted)]">
+									{profile.id?.slice(0, 12)}...
+								</div>
+							</div>
 						</button>
-					</li>
-				{:else}
-					<li class="h-4 w-2"></li>
-				{/if}
-			</ul>
-		</nav>
+
+						<div class="flex items-center gap-2">
+							{#if $userProfile?.id === profile?.id}
+								<span class="kb-chip" data-tone="success">
+									<Icon icon="mdi:check" width={14} />
+									Current
+								</span>
+							{/if}
+
+							{#if canEdit}
+								<button
+									type="button"
+									class="kb-icon-button size-9"
+									title="Delete profile"
+									onclick={() => deleteProfile(profile)}
+								>
+									<Icon icon="mdi:trash-can-outline" width={16} />
+								</button>
+							{/if}
+						</div>
+					</div>
+				{/each}
+			</div>
+
+			{#if canEdit}
+				<div class="kb-divider my-2"></div>
+				<button
+					type="button"
+					class="kb-menu-item text-[var(--kb-text)]"
+					onclick={() => {
+						currentPage.set(Page.AddProfile);
+						onclose();
+					}}
+				>
+					<div class="flex items-center gap-3">
+						<span class="kb-site-orb">
+							<Icon icon="mdi:plus" width={18} />
+						</span>
+						<div>
+							<div class="text-sm font-semibold">Add another identity</div>
+							<div class="text-xs text-[var(--kb-muted)]">Use a key you already have or create a new one.</div>
+						</div>
+					</div>
+					<Icon icon="mdi:arrow-right" width={18} class="text-[var(--kb-muted)]" />
+				</button>
+			{/if}
+		</div>
 	</div>
-</div>
-
-<style>
-	.menu-modal {
-		position: absolute;
-		left: -8.5rem;
-		z-index: 1000;
-		margin-top: 0.25rem;
-	}
-
-	.delete-btn-visible {
-		/* Ensure the delete button is always visible */
-		opacity: 1 !important;
-		visibility: visible !important;
-	}
-</style>
+{/if}

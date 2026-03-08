@@ -1,113 +1,86 @@
 <script lang="ts">
-	import type { PopupSettings } from '@skeletonlabs/skeleton';
+import { onMount } from 'svelte';
+import Icon from '@iconify/svelte';
 
-	import Icon from '@iconify/svelte';
+import { Page } from '$lib/types';
+import { backupCompleted, currentPage, profiles, theme } from '$lib/stores/data';
+import { profileController } from '$lib/controllers/profile.controller';
+import { loadBackupCompletedState } from '$lib/utility/recovery-utils';
 
-	import { Page } from '$lib/types';
-	import { popup, Avatar } from '@skeletonlabs/skeleton';
-	import { userProfile, theme, currentPage } from '$lib/stores/data';
-	import AccountDropdownMenu from './AccountDropdownMenu.svelte';
-	import { derived } from 'svelte/store';
-	import { profileController } from '$lib/controllers/profile.controller';
+const pageTitle = (page: string) =>
+	page.slice(0, 1).toUpperCase() + page.slice(1).replaceAll('-', ' ');
 
-	let accountDropdownMenuOpen = false;
-
-	const accountDropdownMenu: PopupSettings = {
-		event: 'click',
-		target: 'accountDropdownMenu',
-		placement: 'bottom',
-		state: async () => {
-			accountDropdownMenuOpen = false;
-		}
-	};
-
-	const displayName = derived(userProfile, ($userProfile) => {
-		const name = $userProfile?.metadata?.name || $userProfile?.name || 'Click to select account';
-		return name.length > 12 ? name.slice(0, 12) + '...' : name;
-	});
+onMount(() => {
+	loadBackupCompletedState().catch(() => {});
+});
 </script>
 
-<div class="flex flex-row w-full justify-between gap-2">
-	{#if $currentPage === Page.Home}
-		<div class="kb-surface flex flex-col p-4 pb-2 rounded-2xl flex-grow gap-1">
-			<div
-				class="text-gray-800 dark:text-gray-400 text-opacity-70 text-xs font-semibold leading-4 tracking-[2.4000000000000004px]"
-			>
-				ACCOUNT
+{#if $currentPage === Page.Home}
+	<div class="flex items-center justify-between gap-3">
+		<div class="min-w-0 flex items-center gap-2.5">
+			<div class="group relative shrink-0">
+				<img
+					src="assets/logo-on-64.png"
+					alt="Yeti logo"
+					class="size-9 rounded-full object-cover"
+				/>
+				<div
+					class="pointer-events-none absolute left-0 top-full z-20 mt-2 whitespace-nowrap rounded-full border border-[var(--kb-border-strong)] bg-[var(--kb-surface-strong)] px-2.5 py-1 text-[11px] font-semibold text-[var(--kb-text)] opacity-0 shadow-[var(--kb-shadow)] transition duration-150 group-hover:opacity-100"
+				>
+					Brr-hello! ❄️
+				</div>
 			</div>
-			<button
-				class="w-full inline-flex items-center gap-2 bg-transparent hover:bg-zinc-100 dark:hover:bg-zinc-700 text-black dark:text-white pl-1 pr-2 py-2 justify-start rounded-2xl transition-colors"
-				use:popup={accountDropdownMenu}
-				on:click={() => (accountDropdownMenuOpen = !accountDropdownMenuOpen)}
-			>
-				<span class="flex flex-row gap-2 items-center justify-between w-[250px]">
-					<span class="rounded-full bg-zinc-700 ring-1 ring-zinc-600 p-0.5">
-						<Avatar
-							src={$userProfile?.metadata?.picture || 'https://toastr.space/images/toastr.png'}
-							width="w-10"
-							rounded="rounded-full"
-						/>
-					</span>
-					<div
-						class="text-black dark:text-white text-left text-xl font-semibold leading-7 text-ellipsis overflow-hidden flex-grow my-auto"
-					>
-						{$displayName}
-					</div>
-					<Icon
-						icon={accountDropdownMenuOpen ? 'mdi:chevron-up' : 'mdi:chevron-down'}
-						width={28}
-						class="text-gray-500 ml-2 mt-1"
-					/>
-				</span>
-			</button>
+			<div class="truncate text-lg font-semibold tracking-[-0.02em] text-[var(--kb-text)]">
+				Yeti
+			</div>
 		</div>
-		<div class="flex flex-col h-full justify-between gap-3 w-36 items-center">
+		<div class="flex items-center gap-2">
 			<button
-				class="justify-center kb-button flex flex-col py-1.5 rounded-3xl 2xl h-11 w-16"
-				on:click={() => {
+				type="button"
+				class="kb-icon-button kb-icon-button-sm"
+				aria-label={$theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+				onclick={() => {
 					$theme = $theme === 'dark' ? 'light' : 'dark';
 					profileController.switchTheme($theme);
 				}}
 			>
-				<div
-					class="justify-center bg-zinc-400 dark:bg-zinc-800 flex flex-col px-2 py-1.5 rounded-full h-8 w-8 transition-all"
-					class:ml-1={$theme === 'dark'}
-					class:ml-7={$theme === 'light'}
-				>
-					<Icon
-						class="text-white dark:text-gray-400"
-						icon={$theme === 'dark' ? 'bi:moon-fill' : 'bi:sun-fill'}
-						rotate={32}
-					/>
-				</div>
+				<Icon icon={$theme === 'dark' ? 'solar:sun-2-linear' : 'solar:moon-stars-linear'} width={18} />
 			</button>
-			<div class="justify-center kb-button flex items-center flex-col py-1.5 rounded-3xl h-11 w-16">
-				<button
-					class="btn btn-sm text-gray-500 px-0 py-0"
-					on:click={() => {
-						$currentPage = Page.Settings;
-					}}
-				>
-					<Icon icon="mdi:cog-outline" width={22} />
-				</button>
-			</div>
-		</div>
-		<AccountDropdownMenu {accountDropdownMenuOpen} />
-	{:else}
-		<div class="items-stretch self-stretch flex w-full justify-between gap-3">
+
 			<button
 				type="button"
-				class="btn-icon kb-button pl-0"
-				on:click={() => {
-					$currentPage = Page.Home;
+				class="kb-icon-button kb-icon-button-sm relative"
+				aria-label="Open settings"
+				onclick={() => {
+					$currentPage = Page.Settings;
 				}}
 			>
-				<Icon icon="carbon:chevron-left" class="text-black dark:text-white" width={28} />
+				<Icon icon="solar:settings-linear" width={18} />
+				{#if $profiles.length > 0 && !$backupCompleted}
+					<span
+						class="absolute right-1 top-1 size-2.5 rounded-full border-2 border-[var(--kb-surface-strong)] bg-[var(--kb-danger)] shadow-[0_0_0_4px_color-mix(in_srgb,var(--kb-danger)_18%,transparent)]"
+					></span>
+				{/if}
 			</button>
-			<div class="text-black dark:text-white text-2xl font-bold leading-7 self-center grow my-auto">
-				{$currentPage.slice(0, 1).toUpperCase() +
-					$currentPage.slice(1, $currentPage.length).replaceAll('-', ' ')}
+		</div>
+	</div>
+{:else}
+	<div class="relative flex min-h-[2.85rem] items-center justify-center">
+		<button
+			type="button"
+			class="kb-icon-button absolute left-0 top-1/2 -translate-y-1/2"
+			aria-label="Go back"
+			onclick={() => {
+				$currentPage = Page.Home;
+			}}
+		>
+			<Icon icon="solar:arrow-left-linear" width={20} />
+		</button>
+
+		<div class="min-w-0 px-14 text-center">
+			<div class="truncate text-lg font-semibold tracking-[-0.02em] text-[var(--kb-text)]">
+				{pageTitle($currentPage)}
 			</div>
 		</div>
-	{/if}
-</div>
+	</div>
+{/if}

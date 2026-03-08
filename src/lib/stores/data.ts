@@ -4,7 +4,7 @@ import { get, readable, writable, type Writable, type Readable } from 'svelte/st
 import type { Tabs } from 'webextension-polyfill';
 import { BrowserUtil, ProfileUtil } from '$lib/utility';
 import type { Duration, SessionManager } from '$lib/types';
-import { urlToDomain } from '$lib/utility/utils';
+import { urlToScope } from '$lib/utility/utils';
 import { sessionController } from '$lib/controllers/session.controller';
 import { browserController } from '$lib/controllers';
 import { web } from '$lib/utility';
@@ -16,6 +16,7 @@ const duration: Writable<Duration> = writable({
 	value: 0
 });
 const theme: Writable<string> = writable('dark');
+const backupCompleted: Writable<boolean> = writable(false);
 const currentPage: Writable<Page> = writable(Page.Home);
 
 const isAlways: Writable<boolean> = writable(false);
@@ -53,7 +54,7 @@ if (typeof document !== 'undefined') {
 const currentDomain: Readable<string> = {
 	subscribe: (run) => {
 		return currentTab.subscribe((tab) => {
-			run(urlToDomain(tab?.url || ''));
+			run(urlToScope(tab?.url || ''));
 		});
 	}
 };
@@ -105,6 +106,7 @@ export {
 	currentPage,
 	currentTab,
 	currentDomain,
+	backupCompleted,
 	duration,
 	isAccepted,
 	isAlways,

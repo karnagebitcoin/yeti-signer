@@ -27,3 +27,4 @@ export const NostrUtil = {
 export const ProfileUtil = { getWebSiteOrCreate, getNewWebSitePermission };
 
 export * from '$lib/utility/utils';
+export * from '$lib/utility/signer-behavior';

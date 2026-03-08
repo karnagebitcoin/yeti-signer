@@ -15,6 +15,7 @@ interface AuthorizationOptions {
 	accept: boolean;
 	domain: string;
 	choice?: number;
+	actionType?: string;
 }
 
 const createPermission = (accept: boolean, choice: number) => ({
@@ -24,9 +25,9 @@ const createPermission = (accept: boolean, choice: number) => ({
 	reject: !accept
 });
 
-const createHistoryEntry = (accept: boolean): WebSiteHistory => ({
+const createHistoryEntry = (accept: boolean, actionType: string): WebSiteHistory => ({
 	accepted: accept,
-	type: 'permission',
+	type: actionType,
 	created_at: new Date().toString(),
 	data: undefined
 });
@@ -57,20 +58,21 @@ const updateIconForCurrentTab = async (): Promise<void> => {
 const accept = async ({
 	accept,
 	domain,
-	choice = 0
+	choice = 0,
+	actionType = 'permission'
 }: AuthorizationOptions): Promise<AuthorizationResult> => {
-	console.log('Processing authorization:', { accept, domain, choice });
-
 	try {
 		const currentProfile = get(userProfile);
 		const webSites = currentProfile?.data?.webSites || {};
 		const site = ProfileUtil.getWebSiteOrCreate(domain, currentProfile);
+		const permission = createPermission(accept, choice);
 
-		// Update site permission
-		site.permission = createPermission(accept, choice);
+		// Keep website-wide permission only for explicit website authorization actions.
+		if (actionType === 'permission') site.permission = permission;
+		site.permissions = { ...(site.permissions || {}), [actionType]: permission };
 
 		// Add history entry
-		const historyEntry = createHistoryEntry(accept);
+		const historyEntry = createHistoryEntry(accept, actionType);
 		site.history = [...(site.history || []), historyEntry];
 
 		// Update websites
@@ -82,7 +84,6 @@ const accept = async ({
 		// Update UI and save
 		await Promise.all([updateIconForCurrentTab(), profileController.saveProfile(get(userProfile))]);
 
-		console.log('Authorization processed successfully');
 		return { success: true };
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
@@ -97,9 +98,10 @@ const accept = async ({
 const acceptLegacy = async (
 	acceptVal: boolean,
 	domain: string,
-	choice: number = 0
+	choice: number = 0,
+	actionType: string = 'permission'
 ): Promise<boolean> => {
-	const result = await accept({ accept: acceptVal, domain, choice });
+	const result = await accept({ accept: acceptVal, domain, choice, actionType });
 	if (!result.success && result.error) {
 		alert(result.error); // Keep alert for now to maintain current behavior
 	}

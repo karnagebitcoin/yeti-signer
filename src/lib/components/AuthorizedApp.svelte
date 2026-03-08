@@ -1,50 +1,49 @@
 <script lang="ts">
 	import Icon from '@iconify/svelte';
-	import { timeAgo } from '$lib/utility';
-
 	import { createEventDispatcher } from 'svelte';
-	import { timeStop, isAlways, isAccepted } from '$lib/stores/data';
+
+	import { timeAgo } from '$lib/utility';
+	import { isAccepted, isAlways, timeStop } from '$lib/stores/data';
 
 	export let domain = '';
 
 	const dispatcher = createEventDispatcher();
 
-	$: time = $isAlways
+	$: statusLabel = $isAlways
 		? $isAccepted
-			? 'Trusted'
-			: 'Never'
-		: timeAgo.format($timeStop).replace('in ', 'Expire in ');
+			? 'Allowed'
+			: 'Blocked'
+		: $isAccepted
+			? timeAgo.format($timeStop).replace('in ', 'Ends in ')
+			: 'No saved choice';
 </script>
 
-<div
-	class="justify-center items-stretch kb-surface flex w-full flex-col mt-3 p-4 rounded-2xl"
->
-	<div class="justify-between items-stretch flex gap-0">
-		<div
-			class="text-gray-800 dark:text-gray-400 text-opacity-70 text-xs font-semibold leading-4 tracking-[2px] w-[252px]"
-		>
-			AUTHORIZED APP
+<div class="kb-card p-4">
+	<div class="flex items-start justify-between gap-4">
+		<div class="min-w-0 flex-1">
+			<div class="kb-label">This website</div>
+			<div class="mt-2 min-w-0">
+				<div class="truncate text-lg font-semibold tracking-[-0.02em] text-[var(--kb-text)]">
+					{domain || 'No active tab'}
+				</div>
+				<div class="text-sm text-[var(--kb-muted)]">
+					Control what this website can ask your account to do.
+				</div>
+			</div>
 		</div>
-		<div
-			class="text-xs leading-4 whitespace-nowrap"
-			class:text-pink-600={$isAccepted}
-			class:text-gray-400={!$isAccepted}
-			class:dark:text-teal-400={$isAccepted}
-			class:dark:text-gray-600={!$isAccepted}
-		>
-			{time}
-		</div>
-	</div>
-	<div class="justify-between items-stretch flex gap-5 mt-2">
-		<div class="text-black dark:text-white text-2xl font-semibold leading-7 truncate">{domain}</div>
-		<div class="bg-opacity-50">
+
+		<div class="flex shrink-0 flex-col items-end gap-3">
+			<span class="kb-chip" data-tone={$isAccepted ? 'success' : 'danger'}>
+				<Icon icon={$isAccepted ? 'mdi:check-circle-outline' : 'mdi:close-circle-outline'} width={14} />
+				{statusLabel}
+			</span>
 			<button
-				class="btn btn-sm text-gray-500 px-0 py-0"
-				on:click={() => {
-					dispatcher('showAuthorization', true);
-				}}
+				type="button"
+				class="kb-icon-button"
+				aria-label="Configure authorization"
+				onclick={() => dispatcher('showAuthorization', true)}
 			>
-				<Icon icon="mingcute:settings-2-line" width={26} />
+				<Icon icon="solar:tuning-2-linear" width={18} />
 			</button>
 		</div>
 	</div>

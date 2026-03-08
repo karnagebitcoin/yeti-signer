@@ -13,6 +13,8 @@ interface Message {
 	requestId?: string | number | undefined;
 	prompt?: boolean | undefined; // popup message
 	response?: boolean | undefined | any; // only when its reply
+	internal?: string | undefined;
+	passphrase?: string | undefined;
 	type: MessageType | string;
 	params: any | undefined;
 	url: string | undefined;
@@ -74,6 +76,7 @@ interface Responders {
 		type: string;
 		data: any;
 		domain: string;
+		popupWindowId?: number;
 	};
 }
 

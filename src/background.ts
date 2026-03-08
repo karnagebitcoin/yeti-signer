@@ -1,8 +1,9 @@
 import type { Message, MessageSender, Responders } from '$lib/types';
 import type { WebSite, Authorization, Profile } from '$lib/types/profile';
+import type { SignerBehaviorMode } from '$lib/utility/signer-behavior';
 
 import { finishEvent, getPublicKey, nip04 } from 'nostr-tools';
-import { urlToDomain, web, BrowserUtil, ProfileUtil } from '$lib/utility';
+import { urlToScope, web, BrowserUtil, ProfileUtil } from '$lib/utility';
 import { userProfile } from '$lib/stores/data';
 import { AllowKind } from '$lib/types';
 import { get } from 'svelte/store';
@@ -10,6 +11,12 @@ import { profileController } from '$lib/controllers/profile.controller';
 import { sessionController } from '$lib/controllers/session.controller';
 import { backgroundController } from '$lib/controllers/background.controller';
 import { browserController } from '$lib/controllers';
+import {
+	DEFAULT_SIGNER_BEHAVIOR,
+	SIGNER_BEHAVIOR_KEY,
+	shouldAutoApproveRequest
+} from '$lib/utility/signer-behavior';
+import { isStorageLockedError, lockStorage, unlockStorage } from '$lib/utility/crypto-utils';
 
 const background = backgroundController();
 const session = sessionController();
@@ -25,26 +32,76 @@ web.runtime.onInstalled.addListener(() => {
 });
 web.runtime.onStartup.addListener(() => BrowserUtil.injectJsinAllTabs('content.js'));
 web.tabs.onActivated.addListener(async (activeInfo) => browserController.switchIcon(activeInfo));
+web.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+	if (changeInfo.status === 'complete' && tab.id) {
+		try {
+			await browserController.injectJsInTab(tab, 'content.js');
+		} catch {}
+	}
+	browserController.switchIcon({ tabId }).catch(() => {});
+});
 BrowserUtil.getCurrentTab().then((tab) => browserController.switchIcon({ tabId: tab.id as number }));
 
 const responders: Responders = {};
 const requestQueue: any[] = [];
+const SUPPORTED_REQUEST_TYPES = new Set([
+	'getPublicKey',
+	'getRelays',
+	'signEvent',
+	'nip04.encrypt',
+	'nip04.decrypt',
+	'replaceURL'
+]);
+
+const isValidRequestMessage = (message: Message): boolean => {
+	return (
+		typeof message?.id === 'string' &&
+		typeof message?.type === 'string' &&
+		SUPPORTED_REQUEST_TYPES.has(message.type)
+	);
+};
+
+const isValidPromptPermission = (permission: any): boolean => {
+	return (
+		permission &&
+		typeof permission === 'object' &&
+		typeof permission.always === 'boolean' &&
+		typeof permission.accept === 'boolean' &&
+		typeof permission.reject === 'boolean' &&
+		permission.duration !== undefined
+	);
+};
+
+const isTrustedPromptSender = (sender: MessageSender): boolean => {
+	if (!sender?.id || sender.id !== web.runtime.id) return false;
+	const senderUrl = sender.url || '';
+	const extensionBase = web.runtime.getURL('');
+	if (!senderUrl.startsWith(extensionBase)) return false;
+	return senderUrl.includes('/popup.html') || senderUrl.includes('/sidepanel.html');
+};
+
+const isInternalStorageMessage = (message: Message & { internal?: string; passphrase?: string }) =>
+	typeof message?.internal === 'string' && message.internal.startsWith('storage.');
+
+const getSignerBehavior = async (): Promise<SignerBehaviorMode> => {
+	const behaviorResult = await web.storage.local.get(SIGNER_BEHAVIOR_KEY);
+	const behavior = behaviorResult?.[SIGNER_BEHAVIOR_KEY] as SignerBehaviorMode | undefined;
+	return behavior || DEFAULT_SIGNER_BEHAVIOR;
+};
 
 const hasWebSiteAlreadyLogged = async (domain: string): Promise<Profile> => {
 	const allUsers = get(await profileController.loadProfiles()) as Profile[];
 	let lastDate = new Date(0);
 	let currentProfile: Profile | undefined;
 	for (const user of allUsers) {
-		const webSites = user.data?.webSites as { [key: string]: WebSite };
-		if (webSites !== undefined && domain in webSites) {
-			const history = webSites[domain].history || [];
-			for (const h of history) {
-				if (h.type === 'getPublicKey') {
-					const date = new Date(h.created_at);
-					if (date > lastDate) {
-						currentProfile = user as Profile;
-						lastDate = date;
-					}
+		const site = ProfileUtil.getWebSiteOrCreate(domain, user);
+		const history = site.history || [];
+		for (const h of history) {
+			if (h.type === 'getPublicKey') {
+				const date = new Date(h.created_at);
+				if (date > lastDate) {
+					currentProfile = user as Profile;
+					lastDate = date;
 				}
 			}
 		}
@@ -114,26 +171,32 @@ const makeResponse = async (type: string, data: any) => {
 	return res;
 };
 
-async function manageResult(message: Message, sender: any) {
-	try {
-		if (message.response === undefined) return;
-		const responderData = responders[message.requestId as string];
-		if (!responderData) return;
+async function manageResult(message: Message): Promise<boolean> {
+	const requestId = message.requestId;
+	if (typeof requestId !== 'string') return false;
+	if (message.response === undefined || message.response === null) return false;
 
-		const domain = responderData.domain;
-		const user = get(userProfile);
-		const site: WebSite = ProfileUtil.getWebSiteOrCreate(domain, user);
+	const response = message.response;
+	const responderData = responders[requestId];
+	if (!responderData) return false;
+
+	if (!isValidPromptPermission(response.permission)) return false;
+
+		try {
+			const domain = responderData.domain;
+			const user = await background.getUserProfile();
+			const site: WebSite = ProfileUtil.getWebSiteOrCreate(domain, user);
 
 		await background.updatePermisison(
-			message.response.permission,
+			response.permission,
 			site,
 			responderData.domain,
 			responderData.type
 		);
 
-		if (message.response.error)
+		if (response.error === true) {
 			responderData.resolve({
-				id: message.requestId,
+				id: requestId,
 				type: responderData.type,
 				ext: 'keys.band',
 				response: {
@@ -143,37 +206,35 @@ async function manageResult(message: Message, sender: any) {
 					}
 				}
 			});
-		else
+		} else {
 			responderData.resolve({
-				id: message.requestId,
+				id: requestId,
 				type: responderData.type,
 				ext: 'keys.band',
 				response: await makeResponse(responderData.type, responderData.data)
 			});
-	} catch (e) {
-		console.error(e);
-	}
+		}
 
-	try {
-		// Only try to remove the window if the tab and windowId exist
-		if (sender && sender.tab && sender.tab.windowId) {
-			web.windows.remove(sender.tab.windowId);
+		if (typeof responderData.popupWindowId === 'number') {
+			try {
+				await web.windows.remove(responderData.popupWindowId);
+			} catch (error) {
+				if (!(error instanceof Error) || !error.message.includes('No window with id')) {
+					console.error('Error removing authorization popup:', error);
+				}
+			}
 		}
+
+		delete responders[requestId];
+		return true;
 	} catch (error) {
-		// Silently handle errors when removing windows that might no longer exist
-		if (error instanceof Error && error.message.includes('No window with id')) {
-			// Window was already closed, nothing to do
-		} else {
-			console.error('Error removing window:', error);
-		}
+		console.error('[Background] Error managing authorization response:', error);
+		return false;
 	}
-	
-	delete responders[message.requestId as string];
-	return;
 }
 
 const pushHistory = async (yes: boolean, message: Message) => {
-	const domain = urlToDomain(message.url || '');
+	const domain = urlToScope(message.url || '');
 	await background.addHistory(
 		{
 			acceptance: yes,
@@ -183,10 +244,18 @@ const pushHistory = async (yes: boolean, message: Message) => {
 	);
 };
 
-const isAllow = async (domain: string): Promise<AllowKind> => {
+const getPermissionForType = (site: WebSite, type: string): Authorization | undefined => {
+	const scopedPermissions = site.permissions || {};
+	if (scopedPermissions[type]) return scopedPermissions[type];
+	if (Object.keys(scopedPermissions).length === 0) return site.permission as Authorization;
+	return undefined;
+};
+
+const isAllow = async (domain: string, type: string): Promise<AllowKind> => {
 	const user = await background.getUserProfile();
 	const site: WebSite = ProfileUtil.getWebSiteOrCreate(domain, user);
-	const permission: Authorization = site.permission as Authorization;
+	const permission = getPermissionForType(site, type);
+	if (!permission) return AllowKind.Nothing;
 
 	if (permission.accept) {
 		if (permission.always) return AllowKind.AlWaysAllow;
@@ -220,6 +289,36 @@ const buildResponseMessage = (message: Message, response: any): any => {
 	};
 };
 
+const rejectPendingFlow = (id: string, type: string, resolve: (value: any) => void) => {
+	resolve({
+		id,
+		type,
+		ext: 'keys.band',
+		response: {
+			error: {
+				message: 'Yeti was reset on this device',
+				stack: 'Yeti was reset on this device'
+			}
+		}
+	});
+};
+
+const clearPendingRequests = () => {
+	const queuedRequests = requestQueue.splice(0, requestQueue.length);
+	for (const queuedRequest of queuedRequests) {
+		rejectPendingFlow(
+			queuedRequest.message.id,
+			queuedRequest.message.type,
+			queuedRequest.resolver
+		);
+	}
+
+	for (const [requestId, responderData] of Object.entries(responders)) {
+		rejectPendingFlow(requestId, responderData.type, responderData.resolve);
+		delete responders[requestId];
+	}
+};
+
 /*eslint no-async-promise-executor: 0*/
 async function manageRequest(
 	message: Message,
@@ -232,11 +331,10 @@ async function manageRequest(
 		const resolve: Promise<any> | any = resolver || res;
 
 		try {
-			const user = await background.getUserProfile();
-
-			
-			const domain = urlToDomain(message.url || '');
-
+			const domain = urlToScope(message.url || '');
+			let user: Profile | null = null;
+			let previousProfile: Profile | undefined;
+			let storageLocked = false;
 
 			if (next === false) {
 				// Check if we already have a request for this domain+type queued OR pending via popup
@@ -253,37 +351,48 @@ async function manageRequest(
 				return;
 			}
 
-			const previousProfile = await hasWebSiteAlreadyLogged(domain);
-
-
-			if (user.data?.privateKey === undefined) {
-	
-				return resolve(
-					buildResponseMessage(message, {
-						error: {
-							message: 'User rejected the request',
-							stack: 'User rejected the request'
-						}
-					})
-				);
+			try {
+				user = await background.getUserProfile();
+				previousProfile = await hasWebSiteAlreadyLogged(domain);
+			} catch (error) {
+				if (isStorageLockedError(error)) {
+					storageLocked = true;
+				} else {
+					throw error;
+				}
 			}
 
-			let access: AllowKind = await isAllow(domain);
+			if (!storageLocked) {
+				if (user?.data?.privateKey === undefined) {
+					return resolve(
+						buildResponseMessage(message, {
+							error: {
+								message: 'User rejected the request',
+								stack: 'User rejected the request'
+							}
+						})
+					);
+				}
 
-			
-			if (message.type === 'getPublicKey')
-				if (previousProfile.id !== user.id) access = AllowKind.Nothing;
+				let access: AllowKind = await isAllow(domain, message.type);
 
-			switch (access) {
-				case AllowKind.AlWaysAllow:
+				if (message.type === 'getPublicKey')
+					if (
+						previousProfile?.id !== user.id &&
+						(access === AllowKind.AlWaysAllow || access === AllowKind.AllowForSession)
+					)
+						access = AllowKind.Nothing;
+
+				switch (access) {
+					case AllowKind.AlWaysAllow:
 	
 					await pushHistory(true, message);
-					return resolve(
-						buildResponseMessage(
-							message,
-							await makeResponse(message.type, message.params.event || message.params)
-						)
-					);
+						return resolve(
+							buildResponseMessage(
+								message,
+								await makeResponse(message.type, message.params?.event || message.params)
+							)
+						);
 				case AllowKind.AlwaysReject:
 	
 					await pushHistory(false, message);
@@ -315,29 +424,41 @@ async function manageRequest(
 							}
 						})
 					);
-				case AllowKind.Nothing:
-	
-					break;
+					case AllowKind.Nothing:
+		
+						break;
+				}
+
+				const signerBehavior = await getSignerBehavior();
+				if (shouldAutoApproveRequest(signerBehavior, message)) {
+					await pushHistory(true, message);
+					return resolve(
+						buildResponseMessage(
+							message,
+							await makeResponse(message.type, message.params?.event || message.params)
+						)
+					);
+				}
 			}
 
-
-			responders[message.id] = {
-				resolve,
-				domain,
-				type: message.type,
-				data: message.params.event || message.params
-			};
+				responders[message.id] = {
+					resolve,
+					domain,
+					type: message.type,
+					data: message.params?.event || message.params
+				};
 
 			const dataId = await session.add({
 				action: 'login',
 				url: message.url,
-				requestId: message.id,
-				type: message.type,
-				data: message.params.event || message.params || '{}' || '',
-				previousProfile
-			});
+					requestId: message.id,
+					type: message.type,
+					data: message.params?.event || message.params || '{}' || '',
+					previousProfile
+				});
 
-			await BrowserUtil.createWindow('popup.html?query=' + btoa(dataId));
+				const popupWindow = await BrowserUtil.createWindow('popup.html?query=' + btoa(dataId));
+				if (popupWindow.id !== undefined) responders[message.id].popupWindowId = popupWindow.id;
 		} catch (error) {
 			console.error('[Background] Error in manageRequest:', error);
 			throw error;
@@ -373,13 +494,68 @@ const proceedNextRequest = async () => {
 setInterval(async () => proceedNextRequest(), 100);
 
 web.runtime.onMessage.addListener((message: Message, sender: MessageSender, sendResponse: (response?: unknown) => void) => {
+	if (isInternalStorageMessage(message as Message & { internal?: string; passphrase?: string })) {
+		const internalMessage = message as Message & { internal: string; passphrase?: string };
+		if (internalMessage.internal === 'storage.unlock') {
+			unlockStorage(internalMessage.passphrase || '')
+				.then(() => sendResponse({ ok: true }))
+				.catch((error) =>
+					sendResponse({
+						ok: false,
+						error: error instanceof Error ? error.message : 'Could not unlock storage'
+					})
+				);
+			return true;
+		}
+		if (internalMessage.internal === 'storage.lock') {
+			lockStorage()
+				.then(() => sendResponse({ ok: true }))
+				.catch((error) =>
+					sendResponse({
+						ok: false,
+						error: error instanceof Error ? error.message : 'Could not lock storage'
+					})
+				);
+			return true;
+		}
+		if (internalMessage.internal === 'storage.reset') {
+			lockStorage()
+				.then(() => {
+					clearPendingRequests();
+					sendResponse({ ok: true });
+				})
+				.catch((error) =>
+					sendResponse({
+						ok: false,
+						error: error instanceof Error ? error.message : 'Could not reset storage'
+					})
+				);
+			return true;
+		}
+	}
 
 
 	if (message.prompt) {
-
-		manageResult(message, sender);
-		sendResponse({ message: true });
+		if (!isTrustedPromptSender(sender)) {
+			sendResponse({ message: false, error: 'Untrusted prompt sender' });
+			return true;
+		}
+		manageResult(message).then((ok) => sendResponse({ message: ok }));
 	} else {
+		if (!isValidRequestMessage(message)) {
+			sendResponse({
+				id: message?.id,
+				type: message?.type || 'unknown',
+				ext: 'keys.band',
+				response: {
+					error: {
+						message: 'Invalid request',
+						stack: 'Invalid request'
+					}
+				}
+			});
+			return true;
+		}
 
 
 		// Call manageRequest immediately instead of using setInterval

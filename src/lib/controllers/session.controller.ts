@@ -17,7 +17,7 @@ export const sessionController = () => {
 	};
 
 	const add = async (event: PopupParams): Promise<string> => {
-		const randomId = Math.random().toString(36).substring(7);
+		const randomId = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).substring(2);
 		const data = await loadData();
 		data[randomId] = event;
 		browser.set({ sessionData: data });

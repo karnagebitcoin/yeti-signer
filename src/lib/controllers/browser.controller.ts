@@ -1,11 +1,18 @@
-import { getDuration, urlToDomain } from '$lib/utility';
+import { getDuration, urlToDomain, urlToScope } from '$lib/utility';
 import { web } from '$lib/utility';
 import type { Tabs, Windows } from 'webextension-polyfill';
 
 import type { Browser, Profile, WebSite } from '$lib/types';
 import { backgroundController } from './background.controller';
+import { isStorageLockedError } from '$lib/utility/crypto-utils';
 
 const createBrowserController = (): Browser => {
+	const getOriginPattern = (url: string): string | null => {
+		const scope = urlToScope(url);
+		if (!scope.startsWith('http://') && !scope.startsWith('https://')) return null;
+		return `${scope}/*`;
+	};
+
 	const get = async (key: string): Promise<{ [key: string]: unknown }> => {
 		try {
 			const result = await web?.storage?.local?.get(key);
@@ -51,6 +58,7 @@ const createBrowserController = (): Browser => {
 			// Check if this is an extensions gallery error or other restricted page
 			if (e instanceof Error && e.message &&
 				(e.message.includes('extensions gallery cannot be scripted') ||
+				 e.message.includes('Missing host permission') ||
 				 e.message.includes('Cannot access') ||
 				 e.message.includes('restricted') ||
 				 e.message.includes('chrome://') ||
@@ -61,8 +69,6 @@ const createBrowserController = (): Browser => {
 				return;
 			}
 
-			// Log other unexpected errors for debugging
-			console.error(tab.id, tab.url);
 			console.error('Error injecting Nostr Provider', e);
 			return Promise.reject(e);
 		}
@@ -82,27 +88,40 @@ const createBrowserController = (): Browser => {
 					tab.url === 'about:blank')
 					continue;
 				await injectJsInTab(tab, jsFileName);
-			} catch (e) {
-				console.log('Error injecting Nostr Provider', e);
-			}
+			} catch {}
 		}
 	};
+	const hasSiteAccess = async (url: string): Promise<boolean> => {
+		const originPattern = getOriginPattern(url);
+		if (!originPattern) return false;
+		if (!web.permissions?.contains) return true;
+		return web.permissions.contains({ origins: [originPattern] });
+	};
+	const requestSiteAccess = async (url: string): Promise<boolean> => {
+		const originPattern = getOriginPattern(url);
+		if (!originPattern || !web.permissions?.request) return false;
+		const granted = await web.permissions.request({ origins: [originPattern] });
+		if (!granted) return false;
+
+		const tab = await getCurrentTab();
+		if (tab?.id) await injectJsInTab(tab, 'content.js');
+		return true;
+	};
 	const switchIcon = async (activeInfo: { tabId: number }) => {
+		const actionApi = web.action || web.browserAction;
+		if (!actionApi) return;
 		try {
 			// Attempt to get the tab - this will fail if the tab no longer exists
 			const tab = await web.tabs.get(activeInfo.tabId);
 			const user: Profile = await backgroundController().getUserProfile();
-			const domain = urlToDomain(tab.url || '');
-			const webSites = user.data?.webSites as { [key: string]: WebSite };
+				const scope = urlToScope(tab.url || '');
+				const legacyDomain = urlToDomain(tab.url || '');
+				const webSites = user.data?.webSites as { [key: string]: WebSite };
 
-			// Use browserAction for Firefox (MV2) or action for Chrome (MV3)
-			const actionApi = web.action || web.browserAction;
-			if (!actionApi) return;
-
-			if (webSites !== undefined && domain in webSites) {
-				actionApi.setIcon({
-					tabId: tab.id,
-					path: 'assets/logo-on.png'
+				if (webSites !== undefined && (scope in webSites || legacyDomain in webSites)) {
+					actionApi.setIcon({
+						tabId: tab.id,
+						path: 'assets/logo-on.png'
 				});
 			} else {
 				actionApi.setIcon({
@@ -116,6 +135,13 @@ const createBrowserController = (): Browser => {
 			}
 			// Silently ignore action API errors on Firefox
 			if (error instanceof Error && error.message.includes('action is undefined')) {
+				return;
+			}
+			if (isStorageLockedError(error)) {
+				actionApi.setIcon({
+					tabId: activeInfo.tabId,
+					path: 'assets/logo-off.png'
+				});
 				return;
 			}
 			throw error;
@@ -136,8 +162,8 @@ const createBrowserController = (): Browser => {
 		url: string | undefined,
 		requestId: string | undefined
 	) => {
-		console.log('[Popup] Sending authorization response:', { yes, choice, url, requestId });
-		
+		if (!requestId) return Promise.resolve();
+
 		getCurrentTab().then((tab) => switchIcon({ tabId: tab.id as number }));
 		
 		const message = {
@@ -156,9 +182,7 @@ const createBrowserController = (): Browser => {
 			url,
 			requestId
 		};
-		
-		console.log('[Popup] Sending message:', message);
-		
+
 		return web.runtime.sendMessage(message);
 	};
 
@@ -168,6 +192,8 @@ const createBrowserController = (): Browser => {
 		getCurrentTab,
 		injectJsInTab,
 		injectJsinAllTabs,
+		hasSiteAccess,
+		requestSiteAccess,
 		createWindow,
 		sendAuthorizationResponse,
 		switchIcon

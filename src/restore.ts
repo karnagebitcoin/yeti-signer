@@ -1,6 +1,8 @@
+import '@fontsource-variable/inter';
 import './styles.css';
 import { mount } from 'svelte';
 import RestoreApp from './RestoreApp.svelte';
+import { debugLog } from '$lib/utility/logger';
 
 // Wait for DOM to be ready
 function initRestore() {
@@ -15,7 +17,7 @@ function initRestore() {
 		const app = mount(RestoreApp, {
 			target
 		});
-		console.log('RestoreApp initialized successfully');
+		debugLog('Restore view initialized');
 		return app;
 	} catch (error) {
 		console.error('Error initializing RestoreApp:', error);

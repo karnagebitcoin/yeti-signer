@@ -38,7 +38,9 @@ window.nostr = {
   },
 
   _call(type, params) {
-    let id = Math.random().toString().slice(-4);
+    const randomBytes = new Uint8Array(16);
+    crypto.getRandomValues(randomBytes);
+    const id = Array.from(randomBytes, (value) => value.toString(16).padStart(2, "0")).join("");
     return new Promise((resolve, reject) => {
       this._requests[id] = { resolve, reject };
       window.postMessage(

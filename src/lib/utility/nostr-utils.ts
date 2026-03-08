@@ -9,6 +9,7 @@ import {
 	nip19
 } from 'nostr-tools';
 import { get, writable, type Writable } from 'svelte/store';
+import { debugLog } from './logger';
 
 const default_relays = ['wss://nos.lol', 'wss://relay.damus.io', 'wss://nostr.wine'];
 
@@ -54,7 +55,7 @@ const checkRelays = async (url: string, isProfile: boolean = false) => {
 		
 		// Throttle console logs to at most one per second to reduce spam
 		if (now - lastRelayErrorLog > 1000) {
-			console.log('Relay not available', url);
+			debugLog('Relay not available');
 			lastRelayErrorLog = now;
 		}
 	}
@@ -134,7 +135,7 @@ const pushRelays = async (profile: Profile): Promise<void> => {
 	return new Promise((resolve) => {
 		const eventFinished = finishEvent(event, profile.data?.privateKey as string);
 		pool.publish(getRelaysList(), eventFinished);
-		console.log('pushed relays');
+		debugLog('Published relay list');
 		resolve();
 	});
 };

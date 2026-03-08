@@ -3,7 +3,9 @@ import { get, type Writable } from 'svelte/store';
 import { NostrUtil } from '$lib/utility';
 import { getPublicKey } from 'nostr-tools';
 import type { Duration, Profile, ProfileController, Relay } from '$lib/types/profile.d';
+import { decryptProfilesFromStorage, encryptProfilesForStorage } from '$lib/utility/crypto-utils';
 import { duration, profiles, userProfile, theme, browser } from '$lib/stores/data';
+import { debugLog } from '$lib/utility/logger';
 
 // Constants
 const DEFAULT_DURATION: Duration = {
@@ -219,7 +221,17 @@ const loadProfile = async (profile: Profile): Promise<boolean | Profile | undefi
 
 const loadProfiles = async (): Promise<Writable<Profile[]>> => {
 	const value = await browser.get('profiles');
-	if (value?.profiles) profiles.set((value?.profiles as Profile[]) || []);
+	if (value?.profiles) {
+		const storedProfiles = (value?.profiles as Profile[]) || [];
+		const decryptedProfiles = await decryptProfilesFromStorage(storedProfiles);
+		profiles.set(decryptedProfiles);
+		const needsMigration = storedProfiles.some(
+			(profile) =>
+				typeof profile.data?.privateKey === 'string' &&
+				!profile.data.privateKey.startsWith('enc:v1:')
+		);
+		if (needsMigration) await saveProfiles();
+	}
 	else {
 		browser.set({ profiles: [] });
 		profiles.set([]);
@@ -261,7 +273,7 @@ const saveProfile = async (profile: Profile): Promise<void> => {
 		profiles.set(updatedProfiles);
 		await saveProfiles();
 
-		console.log(`Profile saved: ${profile.name}`);
+		debugLog('Profile saved', profile.name);
 	} catch (error) {
 		handleError('Save profile', error);
 	}
@@ -269,7 +281,8 @@ const saveProfile = async (profile: Profile): Promise<void> => {
 
 const saveProfiles = async (): Promise<void> => {
 	try {
-		await browser.set({ profiles: get(profiles) });
+		const encryptedProfiles = await encryptProfilesForStorage(get(profiles));
+		await browser.set({ profiles: encryptedProfiles });
 	} catch (error) {
 		handleError('Save profiles', error);
 	}
@@ -290,7 +303,7 @@ const deleteProfile = async (profile: Profile, method?: ProfileDeleteMethod): Pr
 			await browser.set({ currentProfile: null });
 		}
 
-		console.log(`Profile deleted: ${profile.name} (method: ${method})`);
+		debugLog('Profile deleted', profile.name, method);
 	} catch (error) {
 		handleError('Delete profile', error);
 	}
@@ -357,7 +370,7 @@ const addRelayToProfile = async (relayUrl: string): Promise<void> => {
 		await saveProfile(updatedProfile);
 		NostrUtil.pushRelays(updatedProfile);
 
-		console.log(`Relay added: ${relayUrl}`);
+		debugLog('Relay added');
 	} catch (error) {
 		handleError('Add relay to profile', error);
 	}
@@ -376,7 +389,7 @@ const removeRelayFromProfile = async (relay: Relay): Promise<void> => {
 		await saveProfile(updatedProfile);
 		NostrUtil.pushRelays(updatedProfile);
 
-		console.log(`Relay removed: ${relay.url}`);
+		debugLog('Relay removed');
 	} catch (error) {
 		handleError('Remove relay from profile', error);
 	}

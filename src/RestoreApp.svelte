@@ -1,11 +1,59 @@
 <script lang="ts">
 	import Icon from '@iconify/svelte';
+
 	import { browser } from '$lib/stores/data';
-	import type { Profile, Duration } from '$lib/types';
+	import type { Profile } from '$lib/types';
+	import {
+		decryptPayloadWithPassphrase,
+		encryptProfilesForStorage,
+		getStorageProtectionState,
+		initializeStorageProtection,
+		isEncryptedPayload,
+		unlockStorage
+	} from '$lib/utility/crypto-utils';
 
 	let restoreStatus = $state<'idle' | 'success' | 'error'>('idle');
 	let restoreMessage = $state('');
 	let fileInput: HTMLInputElement;
+
+	const requestPassphrase = (message: string): string => {
+		const passphrase = window.prompt(message)?.trim() || '';
+		if (passphrase.length < 8) throw new Error('Passphrase must be at least 8 characters long');
+		return passphrase;
+	};
+
+	const requestConfirmedPassphrase = (message: string, confirmMessage: string): string => {
+		const passphrase = requestPassphrase(message);
+		const confirmation = window.prompt(confirmMessage)?.trim() || '';
+		if (passphrase !== confirmation) throw new Error('Passphrases did not match');
+		return passphrase;
+	};
+
+	const isValidProfileList = (input: unknown): input is Profile[] => {
+		if (!Array.isArray(input)) return false;
+		return input.every(
+			(profile) =>
+				typeof profile === 'object' &&
+				profile !== null &&
+				typeof (profile as Profile).id === 'string' &&
+				typeof (profile as Profile).data?.privateKey === 'string'
+		);
+	};
+
+	const ensureStorageReady = async (): Promise<void> => {
+		const state = await getStorageProtectionState();
+		if (state === 'setup') {
+			const passphrase = requestConfirmedPassphrase(
+				'Create an app passphrase to protect this device',
+				'Type the app passphrase again'
+			);
+			await initializeStorageProtection(passphrase);
+			return;
+		}
+		if (state === 'locked') {
+			await unlockStorage(requestPassphrase('Enter your app passphrase'));
+		}
+	};
 
 	const restoreSettings = async (event: Event) => {
 		const input = event.target as HTMLInputElement;
@@ -15,142 +63,121 @@
 
 		try {
 			const text = await file.text();
-			const backupData = JSON.parse(text);
+			const parsedData = JSON.parse(text);
+			const backupData = isEncryptedPayload(parsedData)
+				? await decryptPayloadWithPassphrase(
+						parsedData,
+						requestPassphrase('Enter the backup passphrase')
+					)
+				: parsedData;
 
-			// Validate backup format
-			if (!backupData.version || !backupData.profiles) {
+			if (backupData.kind && backupData.kind !== 'backup') {
+				throw new Error('This file is not a settings backup');
+			}
+
+			if (!backupData.version || !isValidProfileList(backupData.profiles)) {
 				throw new Error('Invalid backup file format');
 			}
 
-			// Restore profiles
-			if (Array.isArray(backupData.profiles)) {
-				await browser.set({ profiles: backupData.profiles });
-			}
+			await ensureStorageReady();
+			const encryptedProfiles = await encryptProfilesForStorage(backupData.profiles);
+			await browser.set({ profiles: encryptedProfiles });
 
-			// Restore current profile
 			if (backupData.currentProfile) {
 				await browser.set({ currentProfile: backupData.currentProfile });
 			}
 
-			// Restore theme
 			if (backupData.theme) {
 				await browser.set({ theme: backupData.theme });
-				if (backupData.theme === 'dark') {
-					document.documentElement.classList.add('dark');
-				} else {
-					document.documentElement.classList.remove('dark');
-				}
+				if (backupData.theme === 'dark') document.documentElement.classList.add('dark');
+				else document.documentElement.classList.remove('dark');
 			}
 
-			// Restore duration
 			if (backupData.duration) {
 				await browser.set({ duration: backupData.duration });
 			}
 
 			restoreStatus = 'success';
-			restoreMessage = `Restored ${backupData.profiles.length} profile(s) successfully! You can close this tab.`;
-
-			// Reset file input
+			restoreMessage = `Restored ${backupData.profiles.length} profile(s). You can close this tab now.`;
 			input.value = '';
-
 		} catch (error) {
 			console.error('Restore failed:', error);
 			restoreStatus = 'error';
 			restoreMessage = error instanceof Error ? error.message : 'Failed to restore backup';
-
-			// Reset file input
 			input.value = '';
 		}
 	};
 </script>
 
-<div class="min-h-screen bg-white dark:bg-[#222222] flex items-center justify-center p-8">
-	<div class="max-w-md w-full">
-		<div class="text-center mb-8">
-			<img src="assets/logo-on-64.png" alt="Keys.Band" class="w-16 h-16 mx-auto mb-4" />
-			<h1 class="text-2xl font-bold text-black dark:text-white">Restore Backup</h1>
-			<p class="text-gray-500 dark:text-gray-400 mt-2">
-				Select your backup file to restore all profiles and settings.
+<div class="kb-app-shell flex min-h-screen items-center justify-center p-6">
+	<div class="kb-panel w-full max-w-xl p-6 sm:p-8">
+		<div class="flex flex-col gap-6">
+				<div class="flex items-center gap-4">
+					<img src="assets/logo-on-64.png" alt="Yeti" class="size-14 rounded-2xl shadow-lg" />
+				<div>
+					<div class="kb-label">Restore data</div>
+					<h1 class="mt-2 text-xl font-semibold tracking-[-0.02em] text-[var(--kb-text)]">
+						Get your account data back
+					</h1>
+					<p class="mt-1 text-sm text-[var(--kb-muted)]">
+						Choose a backup file to restore your accounts and settings.
+					</p>
+				</div>
+			</div>
+
+			<div class="kb-card p-5">
+				<input type="file" accept=".json" class="hidden" bind:this={fileInput} onchange={restoreSettings} />
+
+				{#if restoreStatus === 'idle'}
+					<button type="button" class="kb-button-primary w-full text-base" onclick={() => fileInput.click()}>
+						<Icon icon="mdi:folder-open-outline" width={20} />
+						Choose backup file
+					</button>
+				{/if}
+
+				{#if restoreStatus === 'success'}
+					<div class="kb-card-muted flex items-start gap-4 px-4 py-4">
+						<span class="kb-site-orb">
+							<Icon icon="mdi:check" width={18} />
+						</span>
+						<div>
+							<div class="text-sm font-semibold text-[var(--kb-text)]">Restore complete</div>
+							<div class="text-sm text-[var(--kb-muted)]">{restoreMessage}</div>
+						</div>
+					</div>
+
+					<button type="button" class="kb-button-secondary mt-4 w-full" onclick={() => window.close()}>
+						Close tab
+					</button>
+				{/if}
+
+				{#if restoreStatus === 'error'}
+					<div class="kb-card-muted flex items-start gap-4 px-4 py-4">
+						<span class="kb-site-orb text-[var(--kb-danger)]">
+							<Icon icon="mdi:alert-circle-outline" width={18} />
+						</span>
+						<div>
+							<div class="text-sm font-semibold text-[var(--kb-text)]">Restore failed</div>
+							<div class="text-sm text-[var(--kb-muted)]">{restoreMessage}</div>
+						</div>
+					</div>
+
+					<button
+						type="button"
+						class="kb-button-primary mt-4 w-full"
+						onclick={() => {
+							restoreStatus = 'idle';
+							fileInput.click();
+						}}
+					>
+						Try another file
+					</button>
+				{/if}
+			</div>
+
+			<p class="text-sm text-[var(--kb-muted)]">
+				Backup files are created from the app settings page.
 			</p>
 		</div>
-
-		<div class="kb-surface p-6 rounded-2xl">
-			<input
-				type="file"
-				accept=".json"
-				class="hidden"
-				bind:this={fileInput}
-				onchange={restoreSettings}
-			/>
-
-			{#if restoreStatus === 'idle'}
-				<button
-					type="button"
-					class="btn w-full bg-pink-400 dark:bg-teal-400 text-black font-medium py-4 px-6 rounded-xl hover:bg-pink-500 dark:hover:bg-teal-500 transition-colors text-lg"
-					onclick={() => fileInput.click()}
-				>
-					<Icon icon="mdi:folder-open" class="mr-2" width={24} />
-					Select Backup File
-				</button>
-			{/if}
-
-			{#if restoreStatus === 'success'}
-				<div class="p-4 rounded-lg bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300">
-					<div class="flex items-center gap-3">
-						<Icon icon="mdi:check-circle" width={32} />
-						<div>
-							<div class="font-medium">Success!</div>
-							<div class="text-sm">{restoreMessage}</div>
-						</div>
-					</div>
-				</div>
-				<button
-					type="button"
-					class="btn w-full mt-4 bg-zinc-200 dark:bg-zinc-700 text-black dark:text-white font-medium py-3 px-4 rounded-xl hover:bg-zinc-300 dark:hover:bg-zinc-600 transition-colors"
-					onclick={() => window.close()}
-				>
-					Close Tab
-				</button>
-			{/if}
-
-			{#if restoreStatus === 'error'}
-				<div class="p-4 rounded-lg bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300">
-					<div class="flex items-center gap-3">
-						<Icon icon="mdi:alert-circle" width={32} />
-						<div>
-							<div class="font-medium">Error</div>
-							<div class="text-sm">{restoreMessage}</div>
-						</div>
-					</div>
-				</div>
-				<button
-					type="button"
-					class="btn w-full mt-4 bg-pink-400 dark:bg-teal-400 text-black font-medium py-3 px-4 rounded-xl hover:bg-pink-500 dark:hover:bg-teal-500 transition-colors"
-					onclick={() => { restoreStatus = 'idle'; fileInput.click(); }}
-				>
-					Try Again
-				</button>
-			{/if}
-		</div>
-
-		<p class="text-center text-gray-400 dark:text-gray-500 text-sm mt-6">
-			Backup files are JSON files exported from Keys.Band
-		</p>
 	</div>
 </div>
-
-<style>
-	.kb-surface {
-		background-color: #f4f4f5;
-	}
-	:global(.dark) .kb-surface {
-		background-color: #3f3f46;
-	}
-	.btn {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		cursor: pointer;
-		border: none;
-	}
-</style>

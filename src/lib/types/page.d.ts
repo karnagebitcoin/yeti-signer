@@ -4,5 +4,5 @@ export enum Page {
 	QrCode = 'qr-code',
 	Profile = 'profile',
 	About = 'about',
-	AddProfile = 'add-account'
+	AddProfile = 'add-identity'
 }

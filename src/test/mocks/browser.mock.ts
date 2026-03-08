@@ -12,6 +12,8 @@ export const mockBrowser: CustomBrowser = {
 	} as Tabs.Tab),
 	injectJsInTab: vi.fn().mockResolvedValue(undefined),
 	injectJsinAllTabs: vi.fn().mockResolvedValue(undefined),
+	hasSiteAccess: vi.fn().mockResolvedValue(true),
+	requestSiteAccess: vi.fn().mockResolvedValue(true),
 	createWindow: vi.fn().mockResolvedValue({
 		id: 1,
 		tabs: [],

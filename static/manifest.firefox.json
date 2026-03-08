@@ -1,8 +1,8 @@
 {
 	"manifest_version": 2,
-	"name": "Keys.Band",
+	"name": "Yeti",
 	"version": "1.6.0",
-	"description": "Nostr Nip07 implementation",
+	"description": "A coooool nostr signer",
 	"browser_action": {
 		"default_popup": "popup.html"
 	},
@@ -10,18 +10,18 @@
 		"16": "assets/logo-on.png",
 		"32": "assets/logo-on.png",
 		"48": "assets/logo-on-64.png",
-		"128": "assets/logo-on-64.png"
+		"128": "assets/logo-on-128.png"
 	},
 	"background": {
 		"scripts": ["background.js"],
 		"type": "module"
 	},
-	"permissions": ["storage", "tabs", "<all_urls>"],
+	"permissions": ["storage", "tabs", "http://*/*", "https://*/*"],
 	"content_scripts": [
 		{
-			"matches": ["<all_urls>"],
+			"matches": ["http://*/*", "https://*/*"],
 			"js": ["content.js"],
-			"run_at": "document_end"
+			"run_at": "document_start"
 		}
 	],
 	"web_accessible_resources": ["assets/nostr-provider.js"],

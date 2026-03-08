@@ -1,191 +1,269 @@
 <script lang="ts">
-	import { ProgressRadial, storePopup, popup, Avatar } from '@skeletonlabs/skeleton';
-	import { computePosition, autoUpdate, offset, shift, flip, arrow } from '@floating-ui/dom';
 	import { onMount } from 'svelte';
-	import { derived } from 'svelte/store';
 	import Icon from '@iconify/svelte';
-	
+
 	import { AppPage } from '$lib/components/App';
-	import { profileController } from '$lib/controllers/profile.controller';
-	import { PageSettings, PageHome, PageAddProfile } from '$lib/Pages';
+	import AccountSwitcher from '$lib/components/AccountSwitcher.svelte';
 	import Authorization from '$lib/components/Authorization.svelte';
-	import AccountDropdownMenu from '$lib/components/AccountDropdownMenu.svelte';
+	import SignerOnboarding from '$lib/components/SignerOnboarding.svelte';
+	import StorageUnlock from '$lib/components/StorageUnlock.svelte';
+	import Spinner from '$lib/components/ui/Spinner.svelte';
+	import { profileController } from '$lib/controllers/profile.controller';
+	import { PageAddProfile, PageHome, PageSettings } from '$lib/Pages';
 	import { browserController } from '$lib/controllers';
-	import { urlToDomain, NostrUtil } from '$lib/utility';
-	import { sessionData, userProfile } from '$lib/stores/data';
-	
+	import { urlToDomain, urlToScope, NostrUtil } from '$lib/utility';
+	import {
+		getStorageProtectionState,
+		initializeStorageProtection,
+		isStorageLockedError,
+		unlockStorage
+	} from '$lib/utility/crypto-utils';
+	import { resetAppData } from '$lib/utility/recovery-utils';
+	import { SIGNER_BEHAVIOR_KEY } from '$lib/utility/signer-behavior';
+	import { currentPage, profiles, sessionData, userProfile } from '$lib/stores/data';
+	import { web } from '$lib/utility';
+	import { Page } from '$lib/types';
+
 	import type { PopupParams } from '$lib/types';
-	import type { PopupSettings } from '@skeletonlabs/skeleton';
 
-	// Initialize Floating UI for Skeleton Labs components
-	storePopup.set({ computePosition, autoUpdate, offset, shift, flip, arrow });
+	let parameter = $state<PopupParams | null>(null);
+	let isAuthorizationRequest = $state(false);
+	let needsOnboarding = $state(false);
+	let storageLockMode = $state<'none' | 'setup' | 'unlock'>('none');
+	let storageLockError = $state('');
+	let storageBusy = $state(false);
 
-	let parameter: PopupParams | null = null;
-	let isAuthorizationRequest = false;
-	let accountDropdownMenuOpen = false;
+	const syncBackgroundUnlock = async (passphrase: string) => {
+		await web.runtime.sendMessage({ internal: 'storage.unlock', passphrase });
+	};
 
-	const accountDropdownMenu: PopupSettings = {
-		event: 'click',
-		target: 'accountDropdownMenu',
-		placement: 'bottom',
-		state: async () => {
-			accountDropdownMenuOpen = false;
+	const hydrateRequestState = async () => {
+		const urlParams = new URLSearchParams(document.location.search);
+		const queryParam = urlParams?.get('query');
+
+		if (!queryParam) {
+			isAuthorizationRequest = false;
+			parameter = null;
+			return;
+		}
+
+		try {
+			const dataId = atob(queryParam);
+			parameter = (await sessionData.getById(dataId)) || null;
+			isAuthorizationRequest = !!parameter;
+
+			if (isAuthorizationRequest) {
+				document.body.style.minWidth = '420px';
+				document.body.style.minHeight = '560px';
+				document.body.style.width = '100%';
+				document.body.style.height = '100%';
+				document.title = 'Yeti Authorization';
+				needsOnboarding = false;
+			}
+		} catch (error) {
+			console.error('[Popup] Error parsing query param:', error);
+			parameter = null;
+			isAuthorizationRequest = false;
+			needsOnboarding = false;
 		}
 	};
 
-	const displayName = derived(userProfile, ($userProfile) => {
-		const name = $userProfile?.metadata?.name || $userProfile?.name || 'Click to select account';
-		return name.length > 12 ? name.slice(0, 12) + '...' : name;
-	});
+	const finishUnlockedLoad = async () => {
+		await profileController.loadProfiles();
+
+		if (!isAuthorizationRequest) {
+			const behavior = await browserController.get(SIGNER_BEHAVIOR_KEY);
+			needsOnboarding = !behavior?.[SIGNER_BEHAVIOR_KEY];
+		}
+	};
 
 	async function handleData() {
-		console.log('[Popup] Starting handleData');
-		
-		// Load theme first to ensure proper styling
 		await profileController.loadTheme();
-		
-		// Load other essential settings
 		await profileController.loadDuration();
-		
-		// Initialize Nostr relay pool
 		NostrUtil.prepareRelayPool();
-		
-		await profileController.loadProfiles();
-		const urlParams = new URLSearchParams(document.location.search);
-		const queryParam = urlParams?.get('query');
-		
-		console.log('[Popup] Query param:', queryParam);
-		
-		if (queryParam) {
-			try {
-				const dataId = atob(queryParam);
-				console.log('[Popup] Decoded dataId:', dataId);
-				
-				parameter = (await sessionData.getById(dataId)) || null;
-				console.log('[Popup] Session data retrieved:', parameter);
-				
-				isAuthorizationRequest = !!parameter;
-				console.log('[Popup] Is authorization request:', isAuthorizationRequest);
-				
-				if (isAuthorizationRequest) {
-					document.body.style.minWidth = '383px';
-					document.body.style.minHeight = '460px';
-					document.body.style.width = '100%';
-					document.body.style.height = '100%';
-					document.title = 'Keys.Band - Authorization';
-					console.log('[Popup] Set authorization popup dimensions');
-				}
-			} catch (e) {
-				console.error('[Popup] Error parsing query param:', e);
-				parameter = null;
-				isAuthorizationRequest = false;
-			}
-		} else {
-			console.log('[Popup] No query param - normal popup mode');
-			isAuthorizationRequest = false;
+		await hydrateRequestState();
+
+		const protectionState = await getStorageProtectionState();
+		if (protectionState === 'setup') {
+			storageLockMode = 'setup';
+			return;
 		}
+		if (protectionState === 'locked') {
+			storageLockMode = 'unlock';
+			return;
+		}
+
+		await finishUnlockedLoad();
 	}
+
+	const handleStorageSubmit = async (event: CustomEvent<{ passphrase: string }>) => {
+		storageBusy = true;
+		storageLockError = '';
+		try {
+			if (storageLockMode === 'setup') {
+				await initializeStorageProtection(event.detail.passphrase);
+			} else {
+				await unlockStorage(event.detail.passphrase);
+			}
+			await syncBackgroundUnlock(event.detail.passphrase);
+			storageLockMode = 'none';
+			await finishUnlockedLoad();
+		} catch (error) {
+			const message =
+				error instanceof Error ? error.message : 'Could not open your saved accounts.';
+			storageLockError = message;
+			if (!isStorageLockedError(error)) {
+				console.error('[Popup] Storage unlock failed:', error);
+			}
+		} finally {
+			storageBusy = false;
+		}
+	};
+
+	const getUnlockedViewUrl = () => {
+		if (window.location.pathname.endsWith('sidepanel.html')) {
+			return web.runtime.getURL('sidepanel.html');
+		}
+
+		return web.runtime.getURL('popup.html');
+	};
+
+	const handleStorageReset = async () => {
+		const confirmed = window.confirm(
+			'Reset Yeti on this device? This removes every saved account, your passphrase, and saved website choices from this browser. Only do this if you still have your key or a backup somewhere else.'
+		);
+		if (!confirmed) return;
+
+		storageBusy = true;
+		storageLockError = '';
+
+		try {
+			await web.runtime.sendMessage({ internal: 'storage.reset' });
+			await resetAppData();
+			profiles.set([]);
+			userProfile.set({});
+			currentPage.set(Page.Home);
+			needsOnboarding = false;
+			parameter = null;
+			isAuthorizationRequest = false;
+			window.location.replace(getUnlockedViewUrl());
+		} catch (error) {
+			storageLockError =
+				error instanceof Error ? error.message : 'Could not reset Yeti on this device.';
+		} finally {
+			storageBusy = false;
+		}
+	};
 
 	const promise = handleData();
 
 	onMount(() => {
-		// Check if we're in a side panel (not a popup)
 		const isSidePanel = document.getElementById('sidepanel') !== null;
 
-		// Set default popup dimensions only if not authorization request and not side panel
 		if (!isAuthorizationRequest && !isSidePanel) {
-			document.body.style.width = '400px';
-			document.body.style.height = '500px';
+			document.body.style.width = '420px';
+			document.body.style.height = '600px';
 		}
 	});
 </script>
 
 {#await promise}
-	<div class="w-full h-full flex flex-col gap-10 p-12 items-center dark:bg-[#222222] bg-white">
-		<span class="loading text-lg">loading...</span>
-		<ProgressRadial stroke={20} width="w-16 mx-auto" value={undefined} />
-	</div>
-{:then}
-	{#if isAuthorizationRequest && parameter}
-		<!-- Authorization popup -->
-		<div class="w-full h-screen flex flex-col p-4 mx-auto items-center dark:bg-[#222222] bg-white overflow-hidden">
-			{#if 'previousProfile' in parameter && parameter.previousProfile.id !== $userProfile.id}
-				<span
-					class="alert alert-warning bg-yellow-300 text-black mb-2 flex flex-row items-center text-sm p-2 gap-2 flex-shrink-0"
-				>
-					<Icon icon="pixelarticons:alert" width={56} />
-					<span>
-						You are using another account for this request <br />
-						Previous profile: {parameter.previousProfile.name}
-					</span>
-				</span>
-			{/if}
-			<div class="w-full kb-surface rounded-lg h-[72px] flex-shrink-0">
-				<div
-					class="text-gray-800 dark:text-gray-400 text-opacity-70 font-semibold leading-4 tracking-[3px] flex flex-row items-center gap-2 p-2"
-				>
-					<button
-						class="w-full inline-flex items-center gap-2 bg-transparent hover:bg-zinc-100 dark:hover:bg-zinc-700 text-black dark:text-white px-3 py-2 justify-start rounded-2xl transition-colors"
-						use:popup={accountDropdownMenu}
-						onclick={() => (accountDropdownMenuOpen = !accountDropdownMenuOpen)}
-					>
-						<span class="flex flex-row gap-2 items-center justify-between w-full">
-							<span class="rounded-full bg-zinc-700 ring-1 ring-zinc-600 p-0.5">
-								<Avatar
-									src={$userProfile?.metadata?.picture || 'https://toastr.space/images/toastr.png'}
-									width="w-10"
-									rounded="rounded-full"
-								/>
-							</span>
-							<div
-								class="text-black dark:text-white text-left text-xl font-semibold leading-7 text-ellipsis overflow-hidden flex-grow my-auto"
-							>
-								{$displayName}
-							</div>
-							<Icon
-								icon={accountDropdownMenuOpen ? 'mdi:chevron-up' : 'mdi:chevron-down'}
-								width={28}
-								class="text-gray-500 ml-0 mt-1"
-							/>
-						</span>
-					</button>
+	<div class="kb-app-shell flex h-full min-h-[600px] flex-col items-center justify-center p-5">
+		<div class="kb-panel flex w-full max-w-sm flex-col items-center gap-4 p-8 text-center">
+			<Spinner sizeClass="size-12" />
+			<div>
+				<div class="text-lg font-semibold tracking-[-0.03em] text-[var(--kb-text)]">
+					Getting things ready
 				</div>
-				<AccountDropdownMenu {accountDropdownMenuOpen} canEdit={false} />
-			</div>
-			<div class="w-full flex-grow min-h-0 flex flex-col">
-				<Authorization
-					popupType={parameter.type}
-					eventData={parameter.data}
-					isPopup={true}
-					domain={urlToDomain(parameter.url || '')}
-					oncancel={(event) =>
-						browserController.sendAuthorizationResponse(
-							false,
-							event.detail.duration,
-							parameter?.url,
-							parameter?.requestId || ''
-						)}
-					onaccepted={(event) => {
-						console.log('Accepted event received in PopupApp:', event.detail);
-						browserController.sendAuthorizationResponse(
-							true,
-							event.detail.duration,
-							parameter?.url,
-							parameter?.requestId || ''
-						);
-					}}
-				/>
+				<div class="mt-1 text-sm text-[var(--kb-muted)]">
+					Loading your accounts and settings.
+				</div>
 			</div>
 		</div>
-	{:else}
-		<!-- Normal popup -->
-		<div class="w-full h-full flex-grow flex-wrap gap-2 dark:bg-[#222222] bg-white">
-			<div class="w-full h-full flex-grow p-3">
-				<AppPage>
-					<PageHome />
-					<PageSettings />
-					<PageAddProfile />
-				</AppPage>
+	</div>
+	{:then}
+	{#if isAuthorizationRequest && parameter}
+		<div class="kb-app-shell h-full min-h-[560px] p-3">
+			<div class="kb-panel flex h-full flex-col gap-3 p-3">
+				{#if storageLockMode !== 'none'}
+					<StorageUnlock
+						mode={storageLockMode === 'setup' ? 'setup' : 'unlock'}
+						busy={storageBusy}
+						errorMessage={storageLockError}
+						on:submit={handleStorageSubmit}
+						on:reset={handleStorageReset}
+					/>
+				{:else}
+				{#if parameter.previousProfile && parameter.previousProfile.id !== $userProfile.id}
+					<div class="kb-card-muted flex items-start gap-3 px-4 py-3">
+						<span class="kb-site-orb text-[var(--kb-warning)]">
+							<Icon icon="solar:danger-triangle-linear" width={18} />
+						</span>
+						<div class="text-sm text-[var(--kb-muted-strong)]">
+							<div class="font-semibold text-[var(--kb-text)]">Using a different account</div>
+							<div>
+								This request started with <span class="font-semibold">{parameter.previousProfile.name}</span>.
+							</div>
+						</div>
+					</div>
+				{/if}
+
+				<AccountSwitcher
+					canEdit={false}
+					eyebrow="Account for this request"
+					note="This account will be used for the choice below."
+				/>
+
+				<div class="min-h-0 flex-1">
+						<Authorization
+							domain={urlToDomain(parameter.url || '')}
+							scope={urlToScope(parameter.url || '')}
+							eventData={parameter.data}
+							isPopup={true}
+						popupType={parameter.type}
+						oncancel={(event) =>
+							browserController.sendAuthorizationResponse(
+								false,
+								event.detail.duration,
+								parameter?.url,
+								parameter?.requestId || ''
+							)}
+						onaccepted={(event) =>
+							browserController.sendAuthorizationResponse(
+								true,
+								event.detail.duration,
+								parameter?.url,
+								parameter?.requestId || ''
+							)}
+					/>
+				</div>
+				{/if}
+			</div>
+		</div>
+		{:else}
+			<div class="kb-app-shell h-full min-h-[600px] p-3">
+				<div class="kb-panel flex h-full min-h-0 w-full flex-col overflow-hidden p-4">
+					{#if storageLockMode !== 'none'}
+						<StorageUnlock
+							mode={storageLockMode === 'setup' ? 'setup' : 'unlock'}
+							busy={storageBusy}
+							errorMessage={storageLockError}
+							on:submit={handleStorageSubmit}
+							on:reset={handleStorageReset}
+						/>
+					{:else if needsOnboarding}
+						<SignerOnboarding
+							on:complete={() => {
+							needsOnboarding = false;
+						}}
+					/>
+				{:else}
+					<AppPage>
+						<PageHome />
+						<PageSettings />
+						<PageAddProfile />
+					</AppPage>
+				{/if}
 			</div>
 		</div>
 	{/if}
