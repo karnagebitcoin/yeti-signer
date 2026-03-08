@@ -1,6 +1,6 @@
 {
-	"name": "keys.band",
-	"version": "1.6.0",
+	"name": "yeti-signer",
+	"version": "1.6.1",
 	"private": true,
 	"scripts": {
 		"dev": "vite build --watch",

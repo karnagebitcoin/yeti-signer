@@ -15,6 +15,7 @@
 		updateStoragePassphrase
 	} from '$lib/utility/crypto-utils';
 	import {
+		confirmAppPassphrase,
 		downloadEncryptedBackup,
 		downloadEncryptedKeysExport,
 		loadBackupCompletedState,
@@ -130,7 +131,7 @@
 			await downloadEncryptedKeysExport($profiles);
 		} catch (error) {
 			console.error('Export failed:', error);
-			alert('Failed to export keys');
+			alert(error instanceof Error ? error.message : 'Failed to export keys');
 		}
 	};
 
@@ -139,7 +140,30 @@
 			await downloadEncryptedBackup($profiles);
 		} catch (error) {
 			console.error('Backup failed:', error);
-			alert('Failed to create backup');
+			alert(error instanceof Error ? error.message : 'Failed to create backup');
+		}
+	};
+
+	const toggleNsecVisibility = async () => {
+		if (showNsec) {
+			showNsec = false;
+			return;
+		}
+
+		try {
+			await confirmAppPassphrase('reveal this private key');
+			showNsec = true;
+		} catch (error) {
+			alert(error instanceof Error ? error.message : 'Could not reveal private key');
+		}
+	};
+
+	const copyNsec = async () => {
+		try {
+			await confirmAppPassphrase('copy this private key');
+			await copyToClipboard(getNsec(), 'nsec');
+		} catch (error) {
+			alert(error instanceof Error ? error.message : 'Could not copy private key');
 		}
 	};
 
@@ -587,21 +611,21 @@
 								<div class="text-sm font-semibold text-[var(--kb-text)]">Private key</div>
 								<div class="text-xs text-[var(--kb-muted)]">Shown as nsec, which is what most Nostr apps ask for.</div>
 							</div>
-							<button type="button" class="kb-button-ghost" onclick={() => (showNsec = !showNsec)}>
-								<Icon icon={showNsec ? 'mdi:eye-off-outline' : 'mdi:eye-outline'} width={16} />
-								{showNsec ? 'Hide' : 'Reveal'}
-							</button>
+								<button type="button" class="kb-button-ghost" onclick={toggleNsecVisibility}>
+									<Icon icon={showNsec ? 'mdi:eye-off-outline' : 'mdi:eye-outline'} width={16} />
+									{showNsec ? 'Hide' : 'Reveal'}
+								</button>
 						</div>
 
 						{#if showNsec}
 							<div class="mt-3 min-w-0 overflow-x-auto rounded-2xl border border-[var(--kb-border)] bg-white/50 p-2.5 font-mono text-sm text-[var(--kb-text)] dark:bg-white/[0.06]">
 								{getNsec() || 'No private key available'}
 							</div>
-							<button
-								type="button"
-								class="kb-inline-button mt-3 justify-start"
-								onclick={() => copyToClipboard(getNsec(), 'nsec')}
-							>
+								<button
+									type="button"
+									class="kb-inline-button mt-3 justify-start"
+									onclick={copyNsec}
+								>
 								<Icon icon={copiedStates.nsec ? 'mdi:check' : 'mdi:key-star'} width={16} class="text-[var(--kb-accent)]" />
 								{copiedStates.nsec ? 'Copied nsec' : 'Copy nsec'}
 							</button>
@@ -611,13 +635,26 @@
 			{/if}
 		{/if}
 
-		<a
-			class="mx-auto inline-flex items-center gap-2 px-3 py-2 text-xs text-[var(--kb-muted)] transition hover:text-[var(--kb-text)]"
-			href="https://zapmeacoffee.com/npub1r0rs5q2gk0e3dk3nlc7gnu378ec6cnlenqp8a3cjhyzu6f8k5sgs4sq9ac"
-			target="_blank"
-		>
-			<Icon icon="mdi:lightning-bolt" width={16} />
-			Enjoying Yeti? Zap me a coffee
-		</a>
+		<div class="mx-auto flex flex-col items-center gap-1 px-3 py-2 text-center">
+			<a
+				class="inline-flex items-center gap-2 text-xs text-[var(--kb-muted)] transition hover:text-[var(--kb-text)]"
+				href="https://zapmeacoffee.com/npub1r0rs5q2gk0e3dk3nlc7gnu378ec6cnlenqp8a3cjhyzu6f8k5sgs4sq9ac"
+				target="_blank"
+			>
+				<Icon icon="mdi:lightning-bolt" width={16} />
+				Enjoying Yeti? Zap me a coffee
+			</a>
+			<div class="text-[11px] text-[var(--kb-muted)]">
+				A fork of
+				<a
+					class="underline decoration-[var(--kb-border-strong)] underline-offset-2 transition hover:text-[var(--kb-text)]"
+					href="https://keys.band/"
+					target="_blank"
+					rel="noreferrer"
+				>
+					keys.band
+				</a>
+			</div>
+		</div>
 	</div>
 </AppPageItem>
