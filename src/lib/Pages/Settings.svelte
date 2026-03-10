@@ -189,12 +189,15 @@
 			profiles.set(backupData.profiles);
 			await profileController.saveProfiles();
 
-			if (backupData.currentProfile) {
-				await browser.set({ currentProfile: backupData.currentProfile });
-				const restoredProfile = backupData.profiles.find(
-					(p: Profile) => p.id === backupData.currentProfile
-				);
-				if (restoredProfile) userProfile.set(restoredProfile);
+			const restoredProfile =
+				backupData.profiles.find((p: Profile) => p.id === backupData.currentProfile) ||
+				backupData.profiles[0];
+
+			if (restoredProfile) {
+				await profileController.loadProfile(restoredProfile);
+			} else {
+				await browser.set({ currentProfile: null });
+				userProfile.set({} as Profile);
 			}
 
 			if (backupData.theme) {

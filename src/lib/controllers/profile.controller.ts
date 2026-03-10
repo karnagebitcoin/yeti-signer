@@ -110,6 +110,42 @@ const generateProfileId = (privateKey: string): string => {
 	}
 };
 
+const clearActiveProfile = async (): Promise<void> => {
+	userProfile.set({} as Profile);
+	await browser.set({ currentProfile: null });
+};
+
+const ensureActiveProfile = async (availableProfiles: Profile[]): Promise<Profile | null> => {
+	if (availableProfiles.length === 0) {
+		await clearActiveProfile();
+		return null;
+	}
+
+	const storedCurrentProfile = (await browser.get('currentProfile'))?.currentProfile as
+		| string
+		| null
+		| undefined;
+	const currentUserProfile = get(userProfile);
+	const activeProfileId = currentUserProfile?.id || storedCurrentProfile;
+	const existingActiveProfile = activeProfileId
+		? availableProfiles.find((profile) => profile.id === activeProfileId)
+		: undefined;
+
+	if (existingActiveProfile) {
+		if (currentUserProfile?.id !== existingActiveProfile.id) {
+			userProfile.set(existingActiveProfile);
+		}
+		if (storedCurrentProfile !== existingActiveProfile.id) {
+			await browser.set({ currentProfile: existingActiveProfile.id });
+		}
+		return existingActiveProfile;
+	}
+
+	const fallbackProfile = availableProfiles[0];
+	await loadProfile(fallbackProfile);
+	return fallbackProfile;
+};
+
 const isExistingProfile = async (name: string, privateKey: string): Promise<boolean> => {
 	try {
 		const existingProfiles = get(profiles);
@@ -159,6 +195,7 @@ const createProfile = async (
 
 		profiles.set(updatedProfiles);
 		await saveProfiles();
+		await ensureActiveProfile(updatedProfiles);
 
 		return true;
 	} catch (error) {
@@ -221,6 +258,7 @@ const loadProfile = async (profile: Profile): Promise<boolean | Profile | undefi
 
 const loadProfiles = async (): Promise<Writable<Profile[]>> => {
 	const value = await browser.get('profiles');
+	let activeProfileLoaded = false;
 	if (value?.profiles) {
 		const storedProfiles = (value?.profiles as Profile[]) || [];
 		const decryptedProfiles = await decryptProfilesFromStorage(storedProfiles);
@@ -248,6 +286,7 @@ const loadProfiles = async (): Promise<Writable<Profile[]>> => {
 			profile.id = profile.data.pubkey;
 		}
 		if (profile.id === data?.currentProfile) {
+			activeProfileLoaded = true;
 			userProfile.set(profile);
 			await NostrUtil.prepareRelayPool();
 			await loadProfile(profile);
@@ -259,6 +298,10 @@ const loadProfiles = async (): Promise<Writable<Profile[]>> => {
 				saveProfile(profile);
 			}
 		});
+	}
+
+	if (!activeProfileLoaded) {
+		await ensureActiveProfile(get(profiles));
 	}
 	return profiles;
 };
@@ -295,13 +338,7 @@ const deleteProfile = async (profile: Profile, method?: ProfileDeleteMethod): Pr
 
 		profiles.set(filteredProfiles);
 		await saveProfiles();
-
-		// If deleted profile was current, clear it
-		const currentProfile = get(userProfile);
-		if (currentProfile.id === profile.id) {
-			userProfile.set({} as Profile);
-			await browser.set({ currentProfile: null });
-		}
+		await ensureActiveProfile(filteredProfiles);
 
 		debugLog('Profile deleted', profile.name, method);
 	} catch (error) {

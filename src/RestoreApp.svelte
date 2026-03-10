@@ -83,8 +83,14 @@
 			const encryptedProfiles = await encryptProfilesForStorage(backupData.profiles);
 			await browser.set({ profiles: encryptedProfiles });
 
-			if (backupData.currentProfile) {
-				await browser.set({ currentProfile: backupData.currentProfile });
+			const restoredProfile =
+				backupData.profiles.find((profile: Profile) => profile.id === backupData.currentProfile) ||
+				backupData.profiles[0];
+
+			if (restoredProfile) {
+				await browser.set({ currentProfile: restoredProfile.id });
+			} else {
+				await browser.set({ currentProfile: null });
 			}
 
 			if (backupData.theme) {
