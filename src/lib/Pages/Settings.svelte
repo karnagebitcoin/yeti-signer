@@ -49,11 +49,6 @@
 		{ id: 'general', label: 'General', icon: 'solar:settings-linear' },
 		{ id: 'account', label: 'Account', icon: 'solar:user-id-linear' },
 	];
-	const signerBehaviorIcons: Record<SignerBehaviorMode, string> = {
-		auto_sign: 'solar:magic-stick-3-linear',
-		smart_sign: 'solar:shield-check-linear',
-		manual_sign: 'mdi:hand-back-right-outline'
-	};
 
 	$effect(() => {
 		relays = $userProfile.data?.relays || [];
@@ -363,7 +358,7 @@
 									style:border-color={signerBehavior === option.mode ? 'transparent' : 'var(--kb-border)'}
 									style:color={signerBehavior === option.mode ? 'var(--kb-accent-strong)' : 'var(--kb-muted)'}
 								>
-									<Icon icon={signerBehaviorIcons[option.mode]} width={18} />
+									<Icon icon={option.icon} width={18} />
 								</span>
 								<div class="min-w-0 flex-1">
 									<div class="flex flex-wrap items-center gap-2">

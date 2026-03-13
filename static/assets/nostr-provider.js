@@ -37,6 +37,16 @@ window.nostr = {
     },
   },
 
+  nip44: {
+    async encrypt(peer, plaintext) {
+      return window.nostr._call("nip44.encrypt", { peer, plaintext });
+    },
+
+    async decrypt(peer, ciphertext) {
+      return window.nostr._call("nip44.decrypt", { peer, ciphertext });
+    },
+  },
+
   _call(type, params) {
     const randomBytes = new Uint8Array(16);
     crypto.getRandomValues(randomBytes);

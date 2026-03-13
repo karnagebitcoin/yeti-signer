@@ -47,17 +47,30 @@
 					style:border-color={selectedMode === option.mode ? 'var(--kb-accent)' : 'var(--kb-border)'}
 					onclick={() => (selectedMode = option.mode)}
 				>
-					<div class="flex items-start justify-between gap-3">
-						<div class="min-w-0">
-							<div class="text-sm font-semibold text-[var(--kb-text)]">{option.title}</div>
-							<div class="text-sm text-[var(--kb-muted-strong)]">{option.summary}</div>
+					<div class="flex items-start gap-3">
+						<span
+							class="flex size-10 shrink-0 items-center justify-center rounded-2xl border"
+							style:background={selectedMode === option.mode ? 'var(--kb-accent-soft)' : 'var(--kb-surface-muted)'}
+							style:border-color={selectedMode === option.mode ? 'transparent' : 'var(--kb-border)'}
+							style:color={selectedMode === option.mode ? 'var(--kb-accent-strong)' : 'var(--kb-muted)'}
+						>
+							<Icon icon={option.icon} width={18} />
+						</span>
+						<div class="min-w-0 flex-1">
+							<div class="flex flex-wrap items-center gap-2">
+								<div class="text-sm font-semibold text-[var(--kb-text)]">{option.title}</div>
+								<div class="text-sm text-[var(--kb-muted-strong)]">{option.summary}</div>
+							</div>
 							<div class="mt-1 text-xs text-[var(--kb-muted)]">{option.description}</div>
 						</div>
-						{#if selectedMode === option.mode}
-							<span class="kb-site-orb h-8 w-8">
-								<Icon icon="mdi:check" width={16} />
-							</span>
-						{/if}
+						<span
+							class="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border"
+							style:background={selectedMode === option.mode ? 'var(--kb-accent-soft)' : 'transparent'}
+							style:border-color={selectedMode === option.mode ? 'color-mix(in srgb, var(--kb-accent) 26%, var(--kb-border))' : 'var(--kb-border)'}
+							style:color={selectedMode === option.mode ? 'var(--kb-accent-strong)' : 'transparent'}
+						>
+							<Icon icon="mdi:check" width={16} />
+						</span>
 					</div>
 				</button>
 			{/each}
@@ -73,4 +86,3 @@
 		</button>
 	</div>
 </div>
-

@@ -46,6 +46,8 @@ if ((window as any).__KEYS_BAND_CONTENT_LOADED__) {
     "signEvent",
     "nip04.encrypt",
     "nip04.decrypt",
+    "nip44.encrypt",
+    "nip44.decrypt",
     "replaceURL",
   ]);
 

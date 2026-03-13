@@ -12,6 +12,8 @@ await window.nostr.signEvent(event);
 await window.nostr.getRelays();
 await window.nostr.nip04.encrypt(pubkey, plaintext);
 await window.nostr.nip04.decrypt(pubkey, ciphertext);
+await window.nostr.nip44.encrypt(pubkey, plaintext);
+await window.nostr.nip44.decrypt(pubkey, ciphertext);
 ```
 
 ## Highlights

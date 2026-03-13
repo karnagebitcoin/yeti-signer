@@ -7,28 +7,32 @@ export interface SignerBehaviorOption {
 	title: string;
 	summary: string;
 	description: string;
+	icon: string;
 }
 
-export const DEFAULT_SIGNER_BEHAVIOR: SignerBehaviorMode = 'manual_sign';
+export const DEFAULT_SIGNER_BEHAVIOR: SignerBehaviorMode = 'auto_sign';
 
 export const SIGNER_BEHAVIOR_OPTIONS: SignerBehaviorOption[] = [
 	{
 		mode: 'auto_sign',
 		title: 'Auto mode',
 		summary: 'Sign everything',
-		description: 'No prompts. The signer handles every request automatically.'
+		description: 'No prompts. The signer handles every request automatically.',
+		icon: 'solar:magic-stick-3-linear'
 	},
 	{
 		mode: 'smart_sign',
 		title: 'Smart mode',
 		summary: 'Sign common events',
-		description: 'Auto-signs common Nostr events and asks for uncommon ones.'
+		description: 'Auto-signs common Nostr events and asks for uncommon ones.',
+		icon: 'solar:shield-check-linear'
 	},
 	{
 		mode: 'manual_sign',
 		title: 'Manual mode',
 		summary: 'Ask every time',
-		description: 'Shows a prompt before every signing or encryption request.'
+		description: 'Shows a prompt before every signing or encryption request.',
+		icon: 'mdi:hand-back-right-outline'
 	}
 ];
 
@@ -89,6 +93,8 @@ export const isCommonSignerRequest = (request: RequestLike): boolean => {
 		case 'getRelays':
 		case 'nip04.encrypt':
 		case 'nip04.decrypt':
+		case 'nip44.encrypt':
+		case 'nip44.decrypt':
 			return true;
 		case 'signEvent':
 			return isCommonSignEvent(request.params);
@@ -105,4 +111,3 @@ export const shouldAutoApproveRequest = (
 	if (mode === 'smart_sign') return isCommonSignerRequest(request);
 	return false;
 };
-

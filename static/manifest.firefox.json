@@ -1,7 +1,7 @@
 {
 	"manifest_version": 2,
 	"name": "Yeti",
-	"version": "1.6.2",
+	"version": "1.6.3",
 	"description": "A coooool nostr signer",
 	"browser_action": {
 		"default_popup": "popup.html"

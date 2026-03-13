@@ -138,7 +138,7 @@
 			</div>
 		</div>
 
-		{#if eventData && (popupType === 'signEvent' || popupType === 'nip04.encrypt' || popupType === 'nip04.decrypt')}
+		{#if eventData && (popupType === 'signEvent' || popupType === 'nip04.encrypt' || popupType === 'nip04.decrypt' || popupType === 'nip44.encrypt' || popupType === 'nip44.decrypt')}
 			<div class="kb-card-muted overflow-hidden px-4 py-3">
 				<button
 					type="button"
