@@ -77,7 +77,7 @@ window.addEventListener("message", (message) => {
     return;
 
   if (message.data.response.error) {
-    let error = new Error("keys.band: " + message.data.response.error.message);
+    let error = new Error("Yeti: " + message.data.response.error.message);
     error.stack = message.data.response.error.stack;
     window.nostr._requests[message.data.id].reject(error);
   } else {

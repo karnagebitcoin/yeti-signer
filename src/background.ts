@@ -2,7 +2,7 @@ import type { Message, MessageSender, Responders } from '$lib/types';
 import type { WebSite, Authorization, Profile } from '$lib/types/profile';
 import type { SignerBehaviorMode } from '$lib/utility/signer-behavior';
 
-import { finishEvent, getPublicKey, nip04, nip44 } from 'nostr-tools';
+import { finishEvent, getPublicKey, nip04 } from 'nostr-tools';
 import { urlToScope, web, BrowserUtil, ProfileUtil } from '$lib/utility';
 import { userProfile } from '$lib/stores/data';
 import { AllowKind } from '$lib/types';
@@ -17,6 +17,8 @@ import {
 	shouldAutoApproveRequest
 } from '$lib/utility/signer-behavior';
 import { isStorageLockedError, lockStorage, unlockStorage } from '$lib/utility/crypto-utils';
+import { decryptNip44Compat, encryptNip44 } from '$lib/utility/nip44-utils';
+import { shouldQueueRequest } from '$lib/utility/request-queue';
 
 const background = backgroundController();
 const session = sessionController();
@@ -169,8 +171,7 @@ const makeResponse = async (type: string, data: any) => {
 			break;
 		case 'nip44.decrypt':
 			try {
-				const conversationKey = nip44.utils.v2.getConversationKey(privateKey, data.peer);
-				res = nip44.decrypt(conversationKey, data.ciphertext);
+				res = decryptNip44Compat(privateKey, data.peer, data.ciphertext);
 			} catch (e) {
 				res = {
 					error: {
@@ -182,8 +183,7 @@ const makeResponse = async (type: string, data: any) => {
 			break;
 		case 'nip44.encrypt':
 			try {
-				const conversationKey = nip44.utils.v2.getConversationKey(privateKey, data.peer);
-				res = nip44.encrypt(conversationKey, data.plaintext);
+				res = encryptNip44(privateKey, data.peer, data.plaintext);
 			} catch (e) {
 				res = {
 					error: {
@@ -365,14 +365,9 @@ async function manageRequest(
 			let storageLocked = false;
 
 			if (next === false) {
-				// Check if we already have a request for this domain+type queued OR pending via popup
-				const existingInQueue = requestQueue.find(
-					(item) => item.message.url === message.url && item.message.type === message.type
-				);
-				const existingPending = Object.values(responders).some(
-					(r) => r.domain === domain && r.type === message.type
-				);
-				if (existingInQueue || existingPending) {
+				// Only collapse true duplicate retries for the same request id.
+				// Different NIP-44/NIP-17 operations from the same site must stay queued.
+				if (!shouldQueueRequest(requestQueue, responders, message)) {
 					return;
 				}
 				requestQueue.push({ message, resolver: resolve });

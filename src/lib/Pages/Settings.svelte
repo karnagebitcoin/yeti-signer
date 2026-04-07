@@ -15,10 +15,16 @@
 		updateStoragePassphrase
 	} from '$lib/utility/crypto-utils';
 	import {
+		applyBackupPayload,
+		relayUrlsFromProfileRelays,
 		confirmAppPassphrase,
 		downloadEncryptedBackup,
 		downloadEncryptedKeysExport,
+		getRemoteBackupInfo,
 		loadBackupCompletedState,
+		markBackupCompleted,
+		restoreBackupFromRelays,
+		saveBackupToRelays,
 		requestConfirmedPassphrase,
 		requestPassphrase
 	} from '$lib/utility/recovery-utils';
@@ -43,6 +49,10 @@
 	});
 	let restoreStatus = $state<'idle' | 'success' | 'error'>('idle');
 	let restoreMessage = $state('');
+	let relayBackupBusy = $state<'idle' | 'saving' | 'restoring' | 'checking'>('idle');
+	let relayBackupInfo = $state<{ exists: boolean; date: string | null } | null>(null);
+	let relayBackupStatus = $state<'idle' | 'success' | 'error'>('idle');
+	let relayBackupMessage = $state('');
 	let fileInput = $state<HTMLInputElement | undefined>(undefined);
 	let signerBehavior = $state<SignerBehaviorMode>(DEFAULT_SIGNER_BEHAVIOR);
 	const settingsSections: Array<{ id: SettingsSection; label: string; icon: string }> = [
@@ -52,6 +62,28 @@
 
 	$effect(() => {
 		relays = $userProfile.data?.relays || [];
+	});
+
+	$effect(() => {
+		const pubkey = $userProfile.data?.pubkey;
+		const relayUrls = relayUrlsFromProfileRelays($userProfile.data?.relays || []);
+
+		if (!pubkey) {
+			relayBackupInfo = null;
+			return;
+		}
+
+		relayBackupBusy = 'checking';
+		getRemoteBackupInfo(pubkey, relayUrls)
+			.then((info) => {
+				relayBackupInfo = { exists: info.exists, date: info.date };
+			})
+			.catch(() => {
+				relayBackupInfo = { exists: false, date: null };
+			})
+			.finally(() => {
+				if (relayBackupBusy === 'checking') relayBackupBusy = 'idle';
+			});
 	});
 
 	onMount(async () => {
@@ -139,6 +171,31 @@
 		}
 	};
 
+	const backupSettingsToRelays = async () => {
+		if (!$userProfile?.data?.privateKey) return;
+
+		relayBackupBusy = 'saving';
+		relayBackupStatus = 'idle';
+		relayBackupMessage = '';
+
+		try {
+			await saveBackupToRelays($userProfile, $profiles);
+			const info = await getRemoteBackupInfo(
+				$userProfile.data.pubkey as string,
+				relayUrlsFromProfileRelays($userProfile.data.relays || [])
+			);
+			relayBackupInfo = { exists: info.exists, date: info.date };
+			relayBackupStatus = 'success';
+			relayBackupMessage = 'Encrypted backup saved to your relays.';
+		} catch (error) {
+			relayBackupStatus = 'error';
+			relayBackupMessage =
+				error instanceof Error ? error.message : 'Could not save the relay backup.';
+		} finally {
+			relayBackupBusy = 'idle';
+		}
+	};
+
 	const toggleNsecVisibility = async () => {
 		if (showNsec) {
 			showNsec = false;
@@ -181,31 +238,7 @@
 				throw new Error('Invalid backup file format');
 			}
 
-			profiles.set(backupData.profiles);
-			await profileController.saveProfiles();
-
-			const restoredProfile =
-				backupData.profiles.find((p: Profile) => p.id === backupData.currentProfile) ||
-				backupData.profiles[0];
-
-			if (restoredProfile) {
-				await profileController.loadProfile(restoredProfile);
-			} else {
-				await browser.set({ currentProfile: null });
-				userProfile.set({} as Profile);
-			}
-
-			if (backupData.theme) {
-				await browser.set({ theme: backupData.theme });
-				theme.set(backupData.theme);
-				if (backupData.theme === 'dark') document.documentElement.classList.add('dark');
-				else document.documentElement.classList.remove('dark');
-			}
-
-			if (backupData.duration) {
-				await browser.set({ duration: backupData.duration });
-				duration.set(backupData.duration as Duration);
-			}
+			await applyBackupPayload(backupData);
 
 			restoreStatus = 'success';
 			restoreMessage = `Restored ${backupData.profiles.length} profile(s) successfully.`;
@@ -225,6 +258,37 @@
 				restoreStatus = 'idle';
 				restoreMessage = '';
 			}, 3000);
+		}
+	};
+
+	const restoreSettingsFromRelays = async () => {
+		const privateKey = $userProfile.data?.privateKey;
+		const relayUrls = relayUrlsFromProfileRelays($userProfile.data?.relays || []);
+		if (!privateKey) return;
+
+		const confirmed = window.confirm(
+			'Restore the backup saved on relays? This will replace the Yeti data on this device.'
+		);
+		if (!confirmed) return;
+
+		relayBackupBusy = 'restoring';
+		relayBackupStatus = 'idle';
+		relayBackupMessage = '';
+
+		try {
+			await confirmAppPassphrase('restore a relay backup');
+			const backupData = await restoreBackupFromRelays(privateKey, relayUrls);
+			await applyBackupPayload(backupData);
+			await markBackupCompleted();
+			relayBackupInfo = { exists: true, date: new Date().toLocaleString() };
+			relayBackupStatus = 'success';
+			relayBackupMessage = `Restored ${backupData.profiles.length} profile(s) from relays.`;
+		} catch (error) {
+			relayBackupStatus = 'error';
+			relayBackupMessage =
+				error instanceof Error ? error.message : 'Could not restore the relay backup.';
+		} finally {
+			relayBackupBusy = 'idle';
 		}
 	};
 
@@ -322,6 +386,15 @@
 					<button
 						type="button"
 						class="kb-button-secondary w-full text-sm"
+						disabled={$profiles.length === 0 || relayBackupBusy !== 'idle'}
+						onclick={backupSettingsToRelays}
+					>
+						<Icon icon="solar:cloud-upload-linear" width={18} />
+						{relayBackupBusy === 'saving' ? 'Saving to relays...' : 'Save to relays'}
+					</button>
+					<button
+						type="button"
+						class="kb-button-secondary w-full text-sm"
 						disabled={$profiles.length === 0}
 						onclick={exportKeys}
 					>
@@ -329,6 +402,30 @@
 						Export all keys
 					</button>
 				</div>
+
+				{#if $profiles.length > 0}
+					<div class="mt-3 rounded-2xl border border-[var(--kb-border)] bg-white/40 px-3 py-2.5 dark:bg-white/[0.04]">
+						<div class="text-sm font-semibold text-[var(--kb-text)]">Relay backup</div>
+						<div class="mt-1 text-xs text-[var(--kb-muted)]">
+							{#if relayBackupInfo?.exists && relayBackupInfo.date}
+								Last saved to relays on {relayBackupInfo.date}.
+							{:else if relayBackupBusy === 'checking'}
+								Checking your relays for a saved backup...
+							{:else}
+								Save one encrypted backup on your relays so this identity can restore Yeti later.
+							{/if}
+						</div>
+
+						{#if relayBackupStatus !== 'idle'}
+							<div
+								class="mt-2 text-xs font-medium"
+								style:color={relayBackupStatus === 'error' ? 'var(--kb-danger)' : 'var(--kb-muted-strong)'}
+							>
+								{relayBackupMessage}
+							</div>
+						{/if}
+					</div>
+				{/if}
 			</div>
 
 			<div class="kb-card flex flex-col gap-3 p-4">
@@ -436,21 +533,34 @@
 							<Icon icon="mdi:upload" width={18} />
 							Restore backup
 						</button>
+						<button
+							type="button"
+							class="kb-button-secondary w-full text-sm"
+							disabled={!$userProfile?.data?.privateKey || relayBackupBusy !== 'idle'}
+							onclick={restoreSettingsFromRelays}
+						>
+							<Icon icon="solar:cloud-download-linear" width={18} />
+							{relayBackupBusy === 'restoring' ? 'Restoring from relays...' : 'Restore from relays'}
+						</button>
 					</div>
 
-					{#if restoreStatus !== 'idle'}
+					{#if restoreStatus !== 'idle' || relayBackupStatus !== 'idle'}
 						<div class="rounded-2xl border border-[var(--kb-border)] bg-white/40 px-3 py-2.5 dark:bg-white/[0.04]">
 							<div
 								class="text-sm font-semibold"
-								style:color={restoreStatus === 'error' ? 'var(--kb-danger)' : 'var(--kb-text)'}
+								style:color={(restoreStatus === 'error' || relayBackupStatus === 'error') ? 'var(--kb-danger)' : 'var(--kb-text)'}
 							>
-								{restoreStatus === 'success' ? 'Backup restored' : 'Could not restore backup'}
+								{#if relayBackupStatus !== 'idle'}
+									{relayBackupStatus === 'success' ? 'Relay backup restored' : 'Could not restore relay backup'}
+								{:else}
+									{restoreStatus === 'success' ? 'Backup restored' : 'Could not restore backup'}
+								{/if}
 							</div>
 							<div
 								class="mt-1 text-xs"
-								style:color={restoreStatus === 'error' ? 'var(--kb-danger)' : 'var(--kb-muted)'}
+								style:color={(restoreStatus === 'error' || relayBackupStatus === 'error') ? 'var(--kb-danger)' : 'var(--kb-muted)'}
 							>
-								{restoreMessage}
+								{relayBackupStatus !== 'idle' ? relayBackupMessage : restoreMessage}
 							</div>
 						</div>
 					{/if}

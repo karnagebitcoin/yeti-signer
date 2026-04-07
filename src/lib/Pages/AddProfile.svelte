@@ -11,8 +11,13 @@
 	import { NostrUtil } from '$lib/utility';
 	import { generateFriendlyAccountName } from '$lib/utility/friendly-name';
 	import {
+		applyBackupPayload,
 		downloadEncryptedBackup,
-		downloadEncryptedKeysExport
+		downloadEncryptedKeysExport,
+		getRemoteBackupInfo,
+		markBackupCompleted,
+		relayUrlsFromRelayTags,
+		restoreBackupFromRelays
 	} from '$lib/utility/recovery-utils';
 
 	type RecoveryStep = {
@@ -31,11 +36,22 @@
 	let generatedKey = $state('');
 	let relays = $state<any[]>([]);
 	let metadata = $state<any>(undefined);
+	let remoteBackupInfo = $state<{ exists: boolean; date: string | null } | null>(null);
+	let remoteBackupBusy = $state<'idle' | 'checking' | 'restoring'>('idle');
+	let remoteBackupMessage = $state('');
+	let remoteBackupError = $state(false);
 	let fetchVersion = 0;
 	let recoveryStep = $state<RecoveryStep | null>(null);
 	let recoveryBusy = $state<'backup' | 'keys' | 'none'>('none');
 	let recoveryStatus = $state<'idle' | 'success' | 'error'>('idle');
 	let recoveryMessage = $state('');
+	const isExistingKeyInput = () => {
+		const trimmedKey = key.trim();
+		return (
+			!generated &&
+			((trimmedKey.startsWith('nsec') && trimmedKey.length >= 63) || trimmedKey.length === 64)
+		);
+	};
 
 	$effect(() => {
 		const trimmedKey = key.trim();
@@ -49,17 +65,23 @@
 			error = false;
 			metadata = undefined;
 			relays = [];
+			remoteBackupInfo = null;
+			remoteBackupMessage = '';
+			remoteBackupError = false;
 			generatedKey = '';
 			if (!generated) name = '';
 			return;
 		}
 
-		if (!trimmedKey.startsWith('nsec') || trimmedKey.length < 63 || generated) {
+		if (!isExistingKeyInput()) {
 			fetchingProfile = false;
 			error = false;
 			if (generated) {
 				metadata = undefined;
 				relays = [];
+				remoteBackupInfo = null;
+				remoteBackupMessage = '';
+				remoteBackupError = false;
 			}
 			return;
 		}
@@ -85,14 +107,65 @@
 
 			metadata = nextMetadata;
 			relays = nextRelays?.tags || [];
+			remoteBackupBusy = 'checking';
+			try {
+				const backupInfo = await getRemoteBackupInfo(
+					getPublicKey(pk),
+					relayUrlsFromRelayTags((nextRelays?.tags || []) as string[][])
+				);
+				remoteBackupInfo = { exists: backupInfo.exists, date: backupInfo.date };
+				remoteBackupMessage = backupInfo.exists
+					? 'A relay backup was found for this identity.'
+					: '';
+				remoteBackupError = false;
+			} catch {
+				remoteBackupInfo = { exists: false, date: null };
+				remoteBackupMessage = '';
+				remoteBackupError = false;
+			} finally {
+				if (currentFetch === fetchVersion) remoteBackupBusy = 'idle';
+			}
 			if (nextMetadata?.name) name = nextMetadata.name as string;
 		} catch (err) {
 			if (currentFetch !== fetchVersion) return;
 			metadata = undefined;
 			relays = [];
+			remoteBackupInfo = null;
+			remoteBackupMessage = '';
+			remoteBackupError = false;
 			error = true;
 		} finally {
 			if (currentFetch === fetchVersion) fetchingProfile = false;
+		}
+	};
+
+	const restoreFromRelays = async () => {
+		remoteBackupError = false;
+		remoteBackupMessage = '';
+		remoteBackupBusy = 'restoring';
+
+		try {
+			const privateKey = await NostrUtil.checkNSEC(key.trim());
+			const confirmed = window.confirm(
+				'Restore the encrypted backup saved on relays? This will replace the Yeti data on this device.'
+			);
+			if (!confirmed) return;
+
+			const backupData = await restoreBackupFromRelays(
+				privateKey,
+				relayUrlsFromRelayTags(relays as string[][])
+			);
+			await applyBackupPayload(backupData);
+			await markBackupCompleted();
+			remoteBackupInfo = { exists: true, date: new Date().toLocaleString() };
+			remoteBackupMessage = `Restored ${backupData.profiles.length} profile(s) from relays.`;
+			currentPage.set(Page.Home);
+		} catch (err) {
+			remoteBackupError = true;
+			remoteBackupMessage =
+				err instanceof Error ? err.message : 'Could not restore the relay backup.';
+		} finally {
+			remoteBackupBusy = 'idle';
 		}
 	};
 
@@ -328,7 +401,7 @@
 					<InputField bind:value={key} placeholder="Paste your private key" />
 				</div>
 
-				{#if key.length > 62 && key.startsWith('nsec')}
+				{#if isExistingKeyInput()}
 					<div class="kb-section-stack">
 						<label class="kb-label" for="profile-name">Display name</label>
 						<InputField bind:value={name} placeholder="Identity name" />
@@ -345,7 +418,7 @@
 							</div>
 						</div>
 					</div>
-				{:else if metadata?.name && key.length > 62 && key.startsWith('nsec')}
+				{:else if metadata?.name && isExistingKeyInput()}
 					<div class="kb-card-muted flex items-center gap-3 px-3 py-3">
 						{#if metadata?.picture}
 							<img src={metadata.picture} alt={metadata.name} class="size-12 rounded-full object-cover shadow-lg" />
@@ -390,6 +463,53 @@
 								You can still add this key by typing a name yourself.
 							</div>
 						</div>
+					</div>
+				{/if}
+
+				{#if isExistingKeyInput() && (remoteBackupBusy === 'checking' || remoteBackupInfo?.exists || remoteBackupMessage)}
+					<div class="kb-card-muted flex flex-col gap-3 px-3 py-3">
+						<div class="flex items-start gap-3">
+							<span class="kb-site-orb shrink-0">
+								<Icon icon="solar:cloud-download-linear" width={18} />
+							</span>
+							<div class="min-w-0">
+								<div class="text-sm font-semibold text-[var(--kb-text)]">
+									{#if remoteBackupBusy === 'checking'}
+										Checking relays for a saved backup
+									{:else if remoteBackupInfo?.exists}
+										Relay backup found
+									{:else}
+										No relay backup found
+									{/if}
+								</div>
+								<div
+									class="text-sm"
+									style:color={remoteBackupError ? 'var(--kb-danger)' : 'var(--kb-muted)'}
+								>
+									{#if remoteBackupBusy === 'checking'}
+										Looking for an encrypted Yeti backup on this identity's relays.
+									{:else if remoteBackupInfo?.exists && remoteBackupInfo.date}
+										Saved on {remoteBackupInfo.date}. You can restore it instead of setting things up by hand.
+									{:else if remoteBackupMessage}
+										{remoteBackupMessage}
+									{:else}
+										If this identity already saved a Yeti backup on relays, it will show up here.
+									{/if}
+								</div>
+							</div>
+						</div>
+
+						{#if remoteBackupInfo?.exists}
+							<button
+								type="button"
+								class="kb-button-secondary w-full text-sm"
+								disabled={remoteBackupBusy !== 'idle'}
+								onclick={restoreFromRelays}
+							>
+								<Icon icon="solar:cloud-download-linear" width={18} />
+								{remoteBackupBusy === 'restoring' ? 'Restoring from relays...' : 'Restore from relays'}
+							</button>
+						{/if}
 					</div>
 				{/if}
 			</div>
